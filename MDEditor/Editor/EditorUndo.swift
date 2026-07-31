@@ -1,4 +1,7 @@
-import AppKit
+// UndoManager's closure API predates Swift concurrency; registrations and
+// invocations here are all confined to the main thread. `@preconcurrency`
+// keeps newer compilers from flagging the (safe) captures.
+@preconcurrency import AppKit
 
 /// Snapshot-based undo for storage mutations performed outside `NSTextView`'s
 /// own editing paths (format commands and editing behaviors).

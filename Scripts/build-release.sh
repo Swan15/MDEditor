@@ -21,13 +21,16 @@ echo "==> Generating project"
 xcodegen
 
 echo "==> Building MDEditor $VERSION (Release)"
+# No output filtering: a failed build must abort the script (set -o pipefail),
+# never package a partial bundle.
 xcodebuild -project MDEditor.xcodeproj -scheme "$SCHEME" \
   -configuration Release -destination 'platform=macOS' \
   -derivedDataPath "$DERIVED" \
   MARKETING_VERSION="$VERSION" \
-  build | grep -E "error|warning: .*MDEditor|BUILD" || true
+  build
 
 test -d "$APP" || { echo "Build failed: $APP missing" >&2; exit 1; }
+test -x "$APP/Contents/MacOS/MDEditor" || { echo "Build failed: app executable missing in $APP" >&2; exit 1; }
 
 echo "==> Staging DMG contents"
 rm -rf "$DIST"
