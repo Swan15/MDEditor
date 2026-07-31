@@ -17,6 +17,15 @@
 /// should bracket mutations with `NSTextView.breakUndoCoalescing()` so typing
 /// groups never merge across a command.
 enum EditorUndo {
+    /// Box silencing sendability diagnostics for the selection-restore
+    /// closure, which is only ever invoked on the main thread (undo
+    /// registration and invocation here are main-thread confined). Captured
+    /// strongly by the undo handler, so its lifetime is never in question.
+    private final class UncheckedSendableBox<T>: @unchecked Sendable {
+        let value: T
+        init(_ value: T) { self.value = value }
+    }
+
     /// Registers the storage's current content and selection as one undo step.
     static func registerUndo(
         storage: NSTextStorage,
@@ -27,6 +36,7 @@ enum EditorUndo {
     ) {
         guard let undoManager else { return }
         let snapshot = NSAttributedString(attributedString: storage)
+        let restoreSelection = restoreSelection.map { UncheckedSendableBox($0) }
         undoManager.registerUndo(withTarget: storage) { storage in
             restore(
                 snapshot, selection: selection, on: storage,
@@ -46,7 +56,7 @@ enum EditorUndo {
         on storage: NSTextStorage,
         undoManager: UndoManager,
         actionName: String,
-        restoreSelection: ((NSRange) -> Void)?
+        restoreSelection: UncheckedSendableBox<(NSRange) -> Void>?
     ) {
         let inverse = NSAttributedString(attributedString: storage)
         undoManager.registerUndo(withTarget: storage) { storage in
@@ -58,6 +68,6 @@ enum EditorUndo {
         }
         undoManager.setActionName(actionName)
         storage.setAttributedString(snapshot)
-        restoreSelection?(selection)
+        restoreSelection?.value(selection)
     }
 }
