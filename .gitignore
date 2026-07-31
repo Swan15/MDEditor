@@ -1,0 +1,17 @@
+# Xcode
+build/
+DerivedData/
+*.xcuserstate
+xcuserdata/
+*.xcscmblueprint
+.swiftpm/
+
+# macOS
+.DS_Store
+
+# Generated project (regenerate with `xcodegen`)
+MDEditor.xcodeproj/
+
+# Generated plists
+Support/Info.plist
+Support/MDEditor.entitlements

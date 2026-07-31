@@ -1,0 +1,80 @@
+name: MDEditor
+options:
+  bundleIdPrefix: com.mdeditor
+  xcodeVersion: "16.3"
+  deploymentTarget:
+    macOS: "15.0"
+  defaultSourceDirectoryType: syncedFolder
+  groupSortPosition: top
+
+packages:
+  swift-markdown:
+    url: https://github.com/swiftlang/swift-markdown
+    from: 0.8.0
+
+targets:
+  MDEditor:
+    type: application
+    platform: macOS
+    sources:
+      - path: MDEditor
+    dependencies:
+      - package: swift-markdown
+        product: Markdown
+    info:
+      path: Support/Info.plist
+      properties:
+        CFBundleName: MDEditor
+        CFBundleDisplayName: MDEditor
+        LSMinimumSystemVersion: "15.0"
+        NSPrincipalClass: NSApplication
+        CFBundleDocumentTypes:
+          - CFBundleTypeName: Markdown Document
+            CFBundleTypeRole: Editor
+            LSHandlerRank: Alternate
+            LSItemContentTypes:
+              - public.markdown
+              - net.daringfireball.markdown
+    entitlements:
+      path: Support/MDEditor.entitlements
+      properties:
+        com.apple.security.app-sandbox: true
+        com.apple.security.files.user-selected.read-write: true
+        com.apple.security.files.bookmarks.app-scope: true
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.mdeditor.app
+        SWIFT_VERSION: "6.0"
+        GENERATE_INFOPLIST_FILE: NO
+        CODE_SIGN_STYLE: Automatic
+        CODE_SIGN_IDENTITY: "-"
+        MARKETING_VERSION: "0.1.0"
+        CURRENT_PROJECT_VERSION: "1"
+
+  MDEditorTests:
+    type: bundle.unit-test
+    platform: macOS
+    sources:
+      - path: MDEditorTests
+    dependencies:
+      - target: MDEditor
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.mdeditor.tests
+        SWIFT_VERSION: "6.0"
+        GENERATE_INFOPLIST_FILE: YES
+        CODE_SIGN_STYLE: Automatic
+        CODE_SIGN_IDENTITY: "-"
+
+schemes:
+  MDEditor:
+    build:
+      targets:
+        MDEditor: all
+        MDEditorTests: [test]
+    run:
+      config: Debug
+    test:
+      config: Debug
+      targets:
+        - MDEditorTests
