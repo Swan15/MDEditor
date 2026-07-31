@@ -209,7 +209,10 @@ final class SessionRestoreTests: XCTestCase {
         XCTAssertEqual(appState.document.fileURL, file.standardizedFileURL)
         XCTAssertEqual(appState.document.pendingMarkdown, "# Restored")
         XCTAssertFalse(appState.document.isDirty)
-        XCTAssertNil(appState.workspaceRoot)
+        XCTAssertEqual(
+            appState.workspaceRoot, dir.standardizedFileURL,
+            "a restored file outside any workspace adopts its parent folder (the sidebar shows it)"
+        )
     }
 
     @MainActor

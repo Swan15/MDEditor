@@ -85,6 +85,29 @@ final class WorkspaceModelTests: XCTestCase {
         XCTAssertNotNil(subNode.children, "children stay loaded after collapse")
     }
 
+    /// Bug: only the disclosure chevron toggled a folder; clicking the row
+    /// itself did nothing. The row's tap handler flips expansion through
+    /// this exact seam — read `expandedURLs`, write `setExpanded` — the
+    /// same one the disclosure binding uses.
+    func testFolderRowTapTogglesExpansion() throws {
+        let dir = try makeTempDir()
+        removeOnExit(dir)
+        let sub = try makeFolder("sub", in: dir)
+        try makeFile("nested.md", in: sub)
+
+        let model = makeModel()
+        model.openWorkspace(at: dir)
+        let subNode = try XCTUnwrap(model.nodes.first)
+
+        // Exactly what SidebarView's folder-row button does on a tap.
+        model.setExpanded(subNode, !model.expandedURLs.contains(subNode.url))
+        XCTAssertTrue(model.expandedURLs.contains(subNode.url), "tap on a collapsed folder expands it")
+        XCTAssertEqual(subNode.children?.map(\.name), ["nested.md"], "expanding loads the children")
+
+        model.setExpanded(subNode, !model.expandedURLs.contains(subNode.url))
+        XCTAssertFalse(model.expandedURLs.contains(subNode.url), "a second tap collapses it again")
+    }
+
     // MARK: - Rescan
 
     func testRescanPicksUpNewFile() throws {

@@ -20,13 +20,18 @@ final class SecurityScope {
     /// Folder URLs currently held open for the session.
     private(set) var heldRoots: [URL] = []
 
-    /// Whether the folder-access prompt was already shown this session
-    /// (the "ask once" guard for the passive on-load prompt).
-    private(set) var didPromptForFolderAccess = false
+    /// Folders the access prompt was already shown for this session
+    /// (the "ask once per folder" guard for the passive on-load prompts).
+    private(set) var promptedFolders: Set<URL> = []
 
-    /// Records that the folder-access prompt has been shown.
-    func notePromptShown() {
-        didPromptForFolderAccess = true
+    /// True when the folder-access prompt was already shown for `folder`.
+    func didPrompt(for folder: URL) -> Bool {
+        promptedFolders.contains(folder.standardizedFileURL)
+    }
+
+    /// Records that the folder-access prompt has been shown for `folder`.
+    func notePromptShown(for folder: URL) {
+        promptedFolders.insert(folder.standardizedFileURL)
     }
 
     /// True when `url` sits inside a folder already held for the session.

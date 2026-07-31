@@ -162,11 +162,25 @@ extension MarkdownTextView {
             isLoading = false
             textView.typingAttributes = defaultTypingAttributes
             textView.selectedRange = NSRange(location: 0, length: 0)
+            resetScrollToTop()
+            clearCodeSpellingMarks()
+            scheduleCodeSpellingMarksClear()
             loadImagesFromDisk()
             updateImageHeightCap()
             updateCodeSubstitutionToggles()
             updateSelectionState()
             updateStatistics()
+        }
+
+        /// A freshly loaded document opens at the very top with the caret at
+        /// the start — no cursor position is ever persisted (hot exit and
+        /// session restore bring back content, not the selection). Without
+        /// this the clip view keeps the previous document's scroll origin
+        /// and the new content appears cut off mid-document.
+        private func resetScrollToTop() {
+            guard let textView, let scrollView = textView.enclosingScrollView else { return }
+            scrollView.contentView.scroll(to: NSPoint(x: 0, y: -scrollView.contentInsets.top))
+            scrollView.reflectScrolledClipView(scrollView.contentView)
         }
 
         // MARK: - NSTextStorageDelegate (restyle + dirty on edit)
@@ -184,6 +198,8 @@ extension MarkdownTextView {
             TableController.sanitize(storage: textStorage, around: editedRange)
             StyleEngine.style(textStorage, range: editedRange)
             isRestyling = false
+            clearCodeSpellingMarks(in: textStorage.mdParagraphRange(for: editedRange))
+            scheduleCodeSpellingMarksClear()
             document.isDirty = true
             updateSelectionState()
             updateStatistics()
@@ -386,6 +402,33 @@ extension MarkdownTextView {
             return paragraphAttributes[MDAttr.codeBlock] != nil || paragraphAttributes[MDAttr.rawBlock] != nil
         }
 
+        // MARK: - Spell checking in code
+
+        /// Pending debounced re-clear of the checker's marks in code ranges.
+        private var codeSpellingClearTask: Task<Void, Never>?
+
+        /// Strips the spell checker's temporary underlines from code ranges
+        /// (code/raw blocks, inline code): code is literal, so its
+        /// "misspellings" are noise. `range` limits the sweep (nil = whole
+        /// document); the checker's own marks land asynchronously, so edits
+        /// pair this with `scheduleCodeSpellingMarksClear`.
+        private func clearCodeSpellingMarks(in range: NSRange? = nil) {
+            guard let textView, let textStorage = textView.textStorage,
+                  let layoutManager = textView.layoutManager else { return }
+            CodeSpellcheck.clearMarksInCode(storage: textStorage, layoutManager: layoutManager, range: range)
+        }
+
+        /// The continuous checker applies its marks on idle, AFTER the edit
+        /// (or load) that triggered them — re-clear once edits settle so
+        /// code ranges stay clean without racing every keystroke.
+        private func scheduleCodeSpellingMarksClear() {
+            codeSpellingClearTask?.cancel()
+            codeSpellingClearTask = Task { @MainActor [weak self] in
+                do { try await Task.sleep(for: .milliseconds(600)) } catch { return }
+                self?.clearCodeSpellingMarks()
+            }
+        }
+
         // MARK: - Paste conversion
 
         /// Paste interception: images on the pasteboard win over everything
@@ -445,9 +488,10 @@ extension MarkdownTextView {
                 invalidateAllLayout()
             }
             guard report.hasPermissionFailures, appState.workspaceRoot == nil,
-                  !scope.didPromptForFolderAccess else { return }
+                  let folder = document.fileURL?.deletingLastPathComponent(),
+                  !scope.didPrompt(for: folder) else { return }
             DispatchQueue.main.async { [weak self] in
-                guard let self, self.presentFolderAccessPanel() else { return }
+                guard let self, self.appState.presentFolderAccessPanel(defaultingTo: folder) != nil else { return }
                 if ImageAttachmentController.retryLoads(report.failures, scope: scope) > 0 {
                     self.invalidateAllLayout()
                 }
@@ -561,23 +605,13 @@ extension MarkdownTextView {
             return document.fileURL != nil
         }
 
-        /// The one-time folder grant: the sandbox gives single-file documents
-        /// access to the .md only; images next to it need the folder.
-        /// Returns true when a folder was picked.
+        /// The one-time folder grant, routed through AppState (shared with
+        /// the workspace adoption prompt). Returns true when a folder was
+        /// picked. Called on explicit user action, so it is NOT gated on
+        /// the once-per-session-per-folder prompt guard.
         @discardableResult
         private func presentFolderAccessPanel() -> Bool {
-            let scope = appState.securityScope
-            scope.notePromptShown()
-            let panel = NSOpenPanel()
-            panel.canChooseFiles = false
-            panel.canChooseDirectories = true
-            panel.allowsMultipleSelection = false
-            panel.message = "MDEditor needs access to this folder to show and save images."
-            panel.prompt = "Grant Access"
-            panel.directoryURL = document.fileURL?.deletingLastPathComponent()
-            guard panel.runModal() == .OK, let url = panel.url else { return false }
-            scope.ensureAccess(to: url)
-            return true
+            appState.presentFolderAccessPanel(defaultingTo: document.fileURL?.deletingLastPathComponent()) != nil
         }
 
         /// NSCocoaErrorDomain permission denials worth a folder grant.

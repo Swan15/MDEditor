@@ -37,6 +37,7 @@ Run through this before shipping a build. Check items off in order; note anythin
 - [ ] Backspace at the very start of a heading/quote/code/list paragraph clears the style to body without deleting text; a second Backspace merges with the previous paragraph.
 - [ ] Backspace at the start of the paragraph after a horizontal rule deletes the rule.
 - [ ] Typing `"` or `--` in body text produces smart quotes/dashes; inside a code block or inline code they stay literal (and autocorrect is off there).
+- [ ] Spell checking: a misspelled word gets the red underline in prose, but NEVER inside a code block, inline code or a raw HTML block — not on load, and not right after typing there (the underline may flash briefly, then clears).
 
 ## Autoformat-as-you-type
 
@@ -129,7 +130,7 @@ Run through this before shipping a build. Check items off in order; note anythin
 
 - [ ] Open a `.md` that references images in an `assets/` folder next to it: images render inline, scaled to the window width (never larger than their natural size). Resize the window narrower/wider: images rescale live, like Word.
 - [ ] A very tall image is capped at ~80% of the visible editor height (aspect preserved).
-- [ ] Open a single `.md` via File → Open… whose images are siblings of the file: the sandbox blocks reading them, so a one-time panel asks for access to the containing folder ("MDEditor needs access to this folder to show and save images"). Grant it → images appear. Decline → dashed placeholders; the prompt does not reappear this session.
+- [ ] Open a single `.md` via File → Open… whose images are siblings of the file: the sandbox blocks reading them, so a one-time panel asks for access to the containing folder ("MDEditor needs access to this folder to show it in the sidebar and load images"). Grant it → images appear. Decline → dashed placeholders; the prompt does not reappear for that folder this session.
 - [ ] Missing image file (`![gone](assets/gone.png)`): dashed placeholder box with the source path; saving keeps the original `![gone](assets/gone.png)` reference byte-for-byte.
 - [ ] Remote image (`![r](https://example.com/x.png)`): placeholder showing the URL — nothing is fetched (offline-first; remote loading is a future opt-in).
 - [ ] Paste a screenshot (⇧⌘4 then ⌘V): lands inline as an image; `assets/pasted-image.png` appears next to the document; saving writes `![pasted-image](assets/pasted-image.png)`. Paste a second one: `pasted-image-2.png`.
@@ -154,6 +155,7 @@ Run through this before shipping a build. Check items off in order; note anythin
 - [ ] Save (⌘S) a document with headings, lists, a quote, code, a table and a rule; close and reopen: content is identical.
 - [ ] Open an existing `.md` file with mixed formatting: renders styled; Save writes back canonical Markdown (diff shows no spurious changes).
 - [ ] File → New and File → Open… swap documents cleanly.
+- [ ] Open a LONG document while the previous one is scrolled halfway down (⌘O, Open Recent, sidebar click or session restore): the editor shows the TOP of the new document with the caret at the very start — never mid-document where the old scroll position was.
 
 ## File management
 
@@ -172,8 +174,9 @@ Run through this before shipping a build. Check items off in order; note anythin
 ## Workspace (folder mode)
 
 - [ ] File → Open Folder… picks a folder: the sidebar shows the folder name header and a tree of folders + Markdown files only (`.txt`, images, dotfiles and dotfolders like `.git` are hidden; an `assets/` folder IS shown). Sorting is folders first, then files, case-insensitive.
-- [ ] Folders expand/collapse with the disclosure triangle; children load on first expand (a large folder doesn't stall the open).
+- [ ] Folders expand/collapse by clicking anywhere on the row (icon or name), like VSCode — the disclosure triangle and the right-click context menu still work; children load on first expand (a large folder doesn't stall the open).
 - [ ] Clicking a file opens it in the editor; the open file's row stays highlighted. With a workspace open, File → Open… (⌘O) starts in the workspace folder and the opened file gets revealed (ancestors expand, row scrolls into view) when it's inside the workspace.
+- [ ] ⌘O / Open Recent / welcome-view open of a file with NO workspace open (or a workspace in a different folder): the sidebar adopts the file's folder as the workspace root and reveals the file. The first time per folder per session macOS may ask for folder access ("…to show it in the sidebar and load images") — grant to see the tree; declining still opens the file and leaves the workspace as it was. A file inside the current workspace leaves the tree as-is.
 - [ ] Live refresh: with the workspace open, add / rename / delete a file in Finder (or `touch` one in Terminal) — the tree updates within about a second. Deleting an expanded folder collapses it away cleanly.
 - [ ] Context menu (right-click a row): New File creates `untitled.md` (then `untitled-2.md`, …) and opens it; New Folder creates `untitled folder` (then `untitled folder 2`, …) and reveals it. On a file row both target the file's folder.
 - [ ] Rename… edits the name in an alert; colliding with an existing name shows an error and changes nothing. Renaming the open file (or a folder containing it) moves the document's save location too — ⌘S afterwards writes to the NEW path.

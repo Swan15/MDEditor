@@ -107,8 +107,8 @@ final class DocumentLifecycleTests: XCTestCase {
         XCTAssertNil(state.document.fileURL)
         XCTAssertEqual(state.documentState, .none)
         XCTAssertTrue(
-            SessionRestore.restoreWindowEntries(defaults: defaults).isEmpty,
-            "the persisted session no longer references the closed file"
+            SessionRestore.restoreWindowEntries(defaults: defaults).allSatisfy { $0.fileURL == nil },
+            "the persisted session no longer references the closed file (the adopted workspace stays open)"
         )
     }
 

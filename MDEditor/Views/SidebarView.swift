@@ -119,7 +119,16 @@ private struct SidebarNodeRow: View {
                     SidebarNodeRow(node: child)
                 }
             } label: {
-                rowLabel(icon: "folder", tint: .accentColor)
+                // VSCode: a tap anywhere on a folder row toggles it — the
+                // chevron alone is too small a target (it still works too).
+                Button {
+                    appState.workspace.setExpanded(node, !isExpanded)
+                } label: {
+                    rowLabel(icon: "folder", tint: .accentColor)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
             }
             .contextMenu { contextMenuItems }
         } else {
@@ -142,6 +151,11 @@ private struct SidebarNodeRow: View {
             get: { appState.workspace.expandedURLs.contains(node.url) },
             set: { appState.workspace.setExpanded(node, $0) }
         )
+    }
+
+    /// Current expansion state (the folder row's tap toggle reads it).
+    private var isExpanded: Bool {
+        appState.workspace.expandedURLs.contains(node.url)
     }
 
     private func rowLabel(icon: String, tint: Color) -> some View {

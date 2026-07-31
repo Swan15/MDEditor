@@ -80,6 +80,7 @@ extension AppState {
             document.loadMarkdown(source)
             hasDocument = true
             NSDocumentController.shared.noteNewRecentDocumentURL(url)
+            adoptWorkspaceForOpenedFile(url)
             workspace.reveal(url)
             persistSession()
         } catch {
@@ -256,6 +257,71 @@ extension AppState {
         workspaceRoot = nil
         workspace.closeWorkspace()
         persistSession()
+    }
+
+    /// A file opened from outside the sidebar (⌘O, recents, welcome,
+    /// session restore) adopts its parent folder as the workspace root —
+    /// the sidebar then shows the opened file, VSCode-style. A file inside
+    /// the current root changes nothing. Sandbox: single-file opens grant
+    /// access to the .md only, so adopting can need the folder grant —
+    /// asked once per folder per session; declining still opens the file,
+    /// the workspace just stays as it was.
+    @MainActor
+    private func adoptWorkspaceForOpenedFile(_ fileURL: URL) {
+        guard let root = WorkspaceRootPolicy.rootForOpenedFile(currentRoot: workspaceRoot, openedFileURL: fileURL) else { return }
+        if hasFolderAccess(root) {
+            openWorkspace(at: root)
+            workspace.reveal(fileURL)
+            return
+        }
+        // Ask once per folder per session, async so the open itself never
+        // blocks on (or queues behind) the panel.
+        guard !securityScope.didPrompt(for: root) else { return }
+        securityScope.notePromptShown(for: root)
+        let armedRoot = workspaceRoot
+        DispatchQueue.main.async { [weak self] in
+            guard let self, self.presentFolderAccessPanel(defaultingTo: root) != nil else { return }
+            // The window may have moved on while the panel was up: adopt
+            // only when this file is still the document, the workspace
+            // wasn't changed meanwhile, and the grant actually made the
+            // folder readable.
+            guard self.document.fileURL == fileURL,
+                  self.workspaceRoot == armedRoot,
+                  WorkspaceRootPolicy.rootForOpenedFile(currentRoot: self.workspaceRoot, openedFileURL: fileURL) == root,
+                  self.hasFolderAccess(root) else { return }
+            self.openWorkspace(at: root)
+            self.workspace.reveal(fileURL)
+        }
+    }
+
+    /// True when `folder` can actually be enumerated: granted this session,
+    /// or simply readable (unsandboxed runs, the app's own container). A
+    /// probe beats `ensureAccess`'s return, which is also false for plain
+    /// non-security-scoped URLs that read fine.
+    private func hasFolderAccess(_ folder: URL) -> Bool {
+        securityScope.covers(folder) || (try? FileManager.default.contentsOfDirectory(atPath: folder.path)) != nil
+    }
+
+    /// The one-time folder grant: the sandbox gives single-file documents
+    /// access to the .md only; showing the folder in the sidebar and
+    /// loading images next to it needs the folder itself. Returns the
+    /// picked folder (access held for the session), nil on cancel.
+    @MainActor
+    @discardableResult
+    func presentFolderAccessPanel(defaultingTo folder: URL?) -> URL? {
+        if let folder {
+            securityScope.notePromptShown(for: folder)
+        }
+        let panel = NSOpenPanel()
+        panel.canChooseFiles = false
+        panel.canChooseDirectories = true
+        panel.allowsMultipleSelection = false
+        panel.message = "MDEditor needs access to this folder to show it in the sidebar and load images."
+        panel.prompt = "Grant Access"
+        panel.directoryURL = folder
+        guard panel.runModal() == .OK, let url = panel.url else { return nil }
+        securityScope.ensureAccess(to: url)
+        return url.standardizedFileURL
     }
 
     // MARK: - Sidebar file management
