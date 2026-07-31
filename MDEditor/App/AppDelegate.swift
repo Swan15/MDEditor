@@ -1,12 +1,14 @@
 import AppKit
 
-/// Application delegate: quit-time dirty-document protection across every
-/// open window.
+/// Application delegate: quit-time unsaved-changes protection across every
+/// open window (VSCode-style hot exit).
 ///
 /// Quitting checks all registered windows: clean sessions (or none) quit
-/// directly; autosave-covered dirty documents save silently; anything else
-/// gets a Save / Don't Save / Cancel alert per window, delivered
-/// asynchronously via `.terminateLater` + `reply(toApplicationShouldTerminate:)`.
+/// directly; autosave-covered dirty files save silently; dirty untitled
+/// documents are stashed into the hot-exit backup store WITHOUT asking
+/// (they restore on relaunch); only dirty files without autosave get a
+/// Save / Don't Save / Cancel alert per window, delivered asynchronously
+/// via `.terminateLater` + `reply(toApplicationShouldTerminate:)`.
 @MainActor
 final class AppDelegate: NSObject, NSApplicationDelegate {
     /// Shared preferences, wired from the SwiftUI app once they exist.
@@ -20,24 +22,41 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         switch DocumentSwitchPolicy.quitAction(
             documents: states.map {
                 DocumentSwitchPolicy.DocumentDirtyState(
-                    isDirty: $0.document.isDirty,
-                    hasFileURL: $0.document.fileURL != nil
+                    state: $0.documentState,
+                    isDirty: $0.isDirtyForPolicy
                 )
             },
             autosaveEnabled: autosaveEnabled
         ) {
-        case .terminate:
-            return .terminateNow
-        case .saveSilentlyAndTerminate:
-            for state in states where state.document.isDirty {
-                state.saveDocumentSilently()
-            }
+        case .terminate, .prepareAndTerminate:
+            prepareAllWindows(states)
             // A failed silent save leaves the document dirty: ask instead of
             // losing the changes.
-            return states.contains(where: { $0.document.isDirty }) ? askToTerminate() : .terminateNow
+            return states.contains(where: \.needsUnsavedFileChangesAlert)
+                ? askToTerminate()
+                : persistSessionAndTerminate()
         case .askUser:
             return askToTerminate()
         }
+    }
+
+    /// Saves autosave-covered dirty files silently and stashes every dirty
+    /// untitled document's hot-exit backup (and drops backups emptied since
+    /// they were stashed). None of this ever prompts.
+    private func prepareAllWindows(_ states: [AppState]) {
+        for state in states {
+            state.prepareForTermination()
+        }
+    }
+
+    /// Writes the session (hot-exit backup IDs included) and quits. The
+    /// windows themselves never "close" on terminate, so nothing else
+    /// persists after this.
+    private func persistSessionAndTerminate() -> NSApplication.TerminateReply {
+        WindowRegistry.shared.persistSession(
+            defaults: WindowRegistry.shared.registeredAppStates.first?.userDefaults ?? .standard
+        )
+        return .terminateNow
     }
 
     /// Presents the save alerts after returning `.terminateLater`.
@@ -51,22 +70,21 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// Alerts one dirty window at a time (Save / Don't Save / Cancel), then
     /// re-runs for the remaining ones. `bypassed` tracks windows the user
     /// already answered "Don't Save" for, so the loop always advances.
-    /// Save runs the full save flow (including the location panel); a
-    /// cancelled save leaves the document dirty and aborts the quit.
+    /// Only dirty files without autosave coverage alert: autosave-covered
+    /// files save silently and untitled documents stash their hot-exit
+    /// backup in the pre-pass. Save runs the full save flow; a cancelled
+    /// save leaves the document dirty and aborts the quit.
     private func confirmTermination(bypassed: Set<ObjectIdentifier>) {
         let records = WindowRegistry.shared.records
-        let autosaveEnabled = settings?.autosaveEnabled ?? true
-        // Autosave-covered documents save silently without asking.
-        for record in records {
-            let document = record.appState.document
-            let id = ObjectIdentifier(record.appState)
-            if document.isDirty, autosaveEnabled, document.fileURL != nil, !bypassed.contains(id) {
-                record.appState.saveDocumentSilently()
-            }
+        for record in records where !bypassed.contains(ObjectIdentifier(record.appState)) {
+            record.appState.prepareForTermination()
         }
         guard let next = records.first(where: {
-            $0.appState.document.isDirty && !bypassed.contains(ObjectIdentifier($0.appState))
+            $0.appState.needsUnsavedFileChangesAlert && !bypassed.contains(ObjectIdentifier($0.appState))
         }) else {
+            WindowRegistry.shared.persistSession(
+                defaults: records.first?.appState.userDefaults ?? .standard
+            )
             NSApp.reply(toApplicationShouldTerminate: true)
             return
         }
@@ -82,7 +100,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         switch alert.runModal() {
         case .alertFirstButtonReturn:
             next.appState.saveDocument()
-            if next.appState.document.isDirty {
+            if next.appState.needsUnsavedFileChangesAlert {
                 NSApp.reply(toApplicationShouldTerminate: false)
             } else {
                 confirmTermination(bypassed: bypassed)

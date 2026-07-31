@@ -36,6 +36,15 @@ final class WindowRegistry {
     /// The bus to retarget on focus changes (injectable for tests).
     private let bus: FormatCommandBus
 
+    /// Hot-exit backup storage, pruned at launch (injectable for tests).
+    private let hotExitStore: HotExitStore
+
+    /// Session entries of windows that already closed this run with a
+    /// stashed untitled backup: the backup still restores on the next
+    /// launch, so every persist keeps carrying these (the windows
+    /// themselves are unregistered).
+    private var hotExitEntries: [WindowSession] = []
+
     /// The most recent window's `openWindow` action, bridged from the SwiftUI
     /// environment so menu commands (which can't reach it) can open windows.
     var openWindowHandler: ((WindowSession) -> Void)?
@@ -43,8 +52,9 @@ final class WindowRegistry {
     /// Guards the one-shot launch restore fan-out.
     private var didRestoreOnLaunch = false
 
-    init(bus: FormatCommandBus = .shared) {
+    init(bus: FormatCommandBus = .shared, hotExitStore: HotExitStore = .shared) {
         self.bus = bus
+        self.hotExitStore = hotExitStore
     }
 
     /// The main window's state (menu commands target this).
@@ -58,6 +68,14 @@ final class WindowRegistry {
         openWindowHandler?(session)
     }
 
+    /// The registered window already showing `url`, if any — used to focus
+    /// that window instead of opening a duplicate (VSCode behavior).
+    func record(withOpenFile url: URL, otherThan appState: AppState) -> WindowRecord? {
+        records.first {
+            $0.appState !== appState && $0.appState.hasDocument && $0.appState.document.fileURL == url
+        }
+    }
+
     /// Registers a window with its state and installs the close interceptor.
     /// Idempotent per window (the SwiftUI window accessor can fire twice).
     func attach(window: NSWindow, appState: AppState) {
@@ -68,7 +86,7 @@ final class WindowRegistry {
         // A window restored before its attach persisted nothing (its state
         // wasn't registered); join it to the stored session now.
         if didRestoreOnLaunch, appState.didRestoreSession {
-            persist(defaults: appState.userDefaults)
+            persistSession(defaults: appState.userDefaults)
         }
     }
 
@@ -83,11 +101,25 @@ final class WindowRegistry {
         retarget(to: record)
     }
 
+    /// Re-installs the appState's current editor as the command target when
+    /// its window is the main one. The editor unmounts in the empty state
+    /// and remounts when a document opens — no focus change fires then, so
+    /// the views re-assert the target through here.
+    func retargetIfMain(appState: AppState) {
+        guard let mainRecord, mainRecord.appState === appState else { return }
+        retarget(to: mainRecord)
+    }
+
     /// Drops the window and re-persists the session without it. When the
     /// main window goes away, commands retarget the next one in z-order.
+    /// A window whose untitled document was stashed for hot exit keeps its
+    /// session entry (it restores on the next launch).
     func unregister(window: NSWindow) {
         guard let index = records.firstIndex(where: { $0.window === window }) else { return }
         let record = records.remove(at: index)
+        if record.appState.untitledBackupID != nil {
+            hotExitEntries.append(record.appState.windowSession)
+        }
         if mainRecord === record {
             mainRecord = records.first
             if let mainRecord {
@@ -97,15 +129,17 @@ final class WindowRegistry {
                 bus.selection = SelectionFormatState()
             }
         }
-        persist(defaults: record.appState.userDefaults)
+        persistSession(defaults: record.appState.userDefaults)
     }
 
     /// One-shot launch restore: hands the first persisted window session to
     /// the launch window's state and opens one window per remaining entry.
+    /// Backups no persisted entry references (orphans) are pruned first.
     func restoreSessionOnLaunch(appState: AppState, openWindow: (WindowSession) -> Void) {
         guard !didRestoreOnLaunch else { return }
         didRestoreOnLaunch = true
         let entries = SessionRestore.restoreWindowEntries(defaults: appState.userDefaults)
+        hotExitStore.prune(except: Set(entries.compactMap(\.untitledBackupID)))
         guard let first = entries.first else { return }
         appState.pendingRestore = first
         for entry in entries.dropFirst() {
@@ -113,10 +147,11 @@ final class WindowRegistry {
         }
     }
 
-    /// Writes the session for every registered window, most-recently-main first.
-    private func persist(defaults: UserDefaults) {
+    /// Writes the session for every registered window, most-recently-main
+    /// first, plus the hot-exit entries of windows that already closed.
+    func persistSession(defaults: UserDefaults) {
         SessionRestore.persist(
-            windows: records.map { WindowSession(fileURL: $0.appState.document.fileURL, workspaceRoot: $0.appState.workspaceRoot) },
+            windows: records.map { $0.appState.windowSession } + hotExitEntries,
             defaults: defaults
         )
     }
@@ -126,7 +161,13 @@ final class WindowRegistry {
     private func retarget(to record: WindowRecord) {
         let target = record.appState.formatTarget
         bus.target = target
-        target?.publishSelectionState()
+        if let target {
+            target.publishSelectionState()
+        } else {
+            // No editor (empty state): stale selection state must not
+            // enable the format commands.
+            bus.selection = SelectionFormatState()
+        }
     }
 }
 
@@ -198,38 +239,44 @@ final class WindowCloseController: NSObject, NSWindowDelegate {
     // MARK: - Close interception
 
     /// The red close button: clean windows close directly; autosave-covered
-    /// dirty documents save silently first; anything else runs the Save /
-    /// Don't Save / Cancel alert asynchronously (`windowShouldClose` must
-    /// return synchronously) and closes the window afterwards when allowed.
+    /// dirty files save silently first; a dirty untitled document stashes a
+    /// hot-exit backup and closes WITHOUT asking (it restores on relaunch);
+    /// a dirty file without autosave runs the Save / Don't Save / Cancel
+    /// alert asynchronously (`windowShouldClose` must return synchronously)
+    /// and closes the window afterwards when allowed.
     func windowShouldClose(_ sender: NSWindow) -> Bool {
         if allowClose {
             allowClose = false
             return true
         }
-        let document = appState.document
-        switch DocumentSwitchPolicy.closeAction(
-            isDirty: document.isDirty,
-            hasFileURL: document.fileURL != nil,
+        switch DocumentSwitchPolicy.windowCloseAction(
+            state: appState.documentState,
+            isDirty: appState.isDirtyForPolicy,
             autosaveEnabled: appState.settings.autosaveEnabled
         ) {
         case .close:
+            // A clean close discards any leftover hot-exit backup (the
+            // restored untitled document was emptied or never edited).
+            appState.discardUntitledBackup()
             return true
         case .saveSilentlyAndClose:
             appState.saveDocumentSilently()
             // A failed silent save leaves the document dirty: ask instead of
             // losing the changes.
-            guard document.isDirty else { return true }
-            askToClose()
-            return false
+            guard !appState.document.isDirty else { askToClose(); return false }
+            return true
+        case .stashHotExitAndClose:
+            appState.stashUntitledBackup()
+            return true
         case .askUser:
             askToClose()
             return false
         }
     }
 
-    /// Save / Don't Save / Cancel. Save runs the full save flow (including
-    /// the location panel for untitled documents); a cancelled save leaves
-    /// the document dirty and aborts the close.
+    /// Save / Don't Save / Cancel — only dirty files without autosave reach
+    /// this (untitled documents hot-exit instead). Save runs the full save
+    /// flow; a cancelled save leaves the document dirty and aborts the close.
     private func askToClose() {
         let document = appState.document
         DispatchQueue.main.async { [weak self] in

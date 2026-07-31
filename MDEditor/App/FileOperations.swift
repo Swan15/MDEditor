@@ -1,12 +1,13 @@
 import AppKit
 import UniformTypeIdentifiers
 
-/// File-menu and sidebar file operations: open/save/close on the current
+/// File-menu and sidebar file operations: new/open/save/close on the current
 /// document, workspace management, recents and session persistence.
 ///
-/// Anything that replaces or backgrounds the current document goes through
-/// the switching policy first (`prepareToSwitchDocument`), so unsaved
-/// content is never lost silently.
+/// Anything that replaces or closes the current document goes through the
+/// lifecycle policy first (`prepareToSwitchDocument` / `closeDocument`), so
+/// unsaved content is never lost silently. Closing a document (⌘W) leaves
+/// the window in the empty state (welcome view) — never a phantom untitled.
 extension AppState {
     /// Content types accepted by the open/save panels.
     private var markdownContentTypes: [UTType] {
@@ -17,27 +18,52 @@ extension AppState {
 
     /// File → New: a fresh empty document (dirty handling first).
     @MainActor func requestNewDocument() {
-        guard prepareToSwitchDocument() else { return }
-        resetToUntitled()
+        guard prepareToSwitchDocument(DocumentSwitchPolicy.newDocumentAction(
+            state: documentState,
+            isDirty: isDirtyForPolicy,
+            autosaveEnabled: settings.autosaveEnabled
+        )) else { return }
+        presentFreshUntitled()
     }
 
     /// File → Open…: pick a Markdown file and load it (dirty handling first).
     @MainActor func requestOpenDocument() {
-        guard prepareToSwitchDocument() else { return }
+        guard prepareToSwitchDocument(DocumentSwitchPolicy.openDocumentAction(
+            state: documentState,
+            isDirty: isDirtyForPolicy,
+            autosaveEnabled: settings.autosaveEnabled
+        )) else { return }
         let panel = NSOpenPanel()
         panel.allowedContentTypes = markdownContentTypes
         panel.allowsMultipleSelection = false
         panel.canChooseDirectories = false
         panel.directoryURL = workspaceRoot
-        guard panel.runModal() == .OK, let url = panel.url else { return }
+        guard panel.runModal() == .OK, let pickedURL = panel.url else { return }
+        let url = pickedURL.standardizedFileURL
+        // Already open in another window: focus it instead of duplicating.
+        if let record = WindowRegistry.shared.record(withOpenFile: url, otherThan: self) {
+            record.window?.makeKeyAndOrderFront(nil)
+            return
+        }
+        guard !hasDocument || url != document.fileURL else { return }
         openDocument(at: url)
     }
 
     /// Opens a specific file (sidebar click, Open Recent): dirty handling first.
     @MainActor func requestOpenDocument(at url: URL) {
-        // Re-opening the file that's already open is a no-op.
-        guard url.standardizedFileURL != document.fileURL else { return }
-        guard prepareToSwitchDocument() else { return }
+        let url = url.standardizedFileURL
+        // Re-opening the file that's already open here is a no-op.
+        if hasDocument && url == document.fileURL { return }
+        // Already open in another window: focus it instead of duplicating.
+        if let record = WindowRegistry.shared.record(withOpenFile: url, otherThan: self) {
+            record.window?.makeKeyAndOrderFront(nil)
+            return
+        }
+        guard prepareToSwitchDocument(DocumentSwitchPolicy.openDocumentAction(
+            state: documentState,
+            isDirty: isDirtyForPolicy,
+            autosaveEnabled: settings.autosaveEnabled
+        )) else { return }
         openDocument(at: url)
     }
 
@@ -46,9 +72,13 @@ extension AppState {
         let url = url.standardizedFileURL
         do {
             let source = try String(contentsOf: url, encoding: .utf8)
+            // The replaced document's untitled backup (if any) is discarded —
+            // it was clean or the user already chose Don't Save to get here.
+            discardUntitledBackup()
             document.fileURL = url
             document.isDirty = false
             document.loadMarkdown(source)
+            hasDocument = true
             NSDocumentController.shared.noteNewRecentDocumentURL(url)
             workspace.reveal(url)
             persistSession()
@@ -62,7 +92,7 @@ extension AppState {
     /// File → Save: serialize the editor content and write it out, asking
     /// for a location first when the document was never saved.
     @MainActor func saveDocument() {
-        guard let markdown = document.serializedMarkdown() else { return }
+        guard hasDocument, let markdown = document.serializedMarkdown() else { return }
         if let url = document.fileURL {
             write(markdown, to: url)
         } else {
@@ -78,7 +108,7 @@ extension AppState {
     /// File → Save As…: always asks for a (new) location and moves the
     /// document's file URL there.
     @MainActor func saveDocumentAs() {
-        guard let markdown = document.serializedMarkdown() else { return }
+        guard hasDocument, let markdown = document.serializedMarkdown() else { return }
         let panel = NSSavePanel()
         panel.allowedContentTypes = markdownContentTypes
         panel.nameFieldStringValue = document.fileURL?.lastPathComponent ?? "Untitled.md"
@@ -99,12 +129,16 @@ extension AppState {
         }
     }
 
-    @MainActor private func write(_ markdown: String, to url: URL) {
+    /// Writes the document out to `url` (internal for hot-exit lifecycle
+    /// tests; the menu flows go through `saveDocument` / `saveDocumentAs`).
+    @MainActor func write(_ markdown: String, to url: URL) {
         let url = url.standardizedFileURL
         do {
             try markdown.write(to: url, atomically: true, encoding: .utf8)
             document.fileURL = url
             document.isDirty = false
+            // Saving an untitled document to a real file retires its backup.
+            discardUntitledBackup()
             NSDocumentController.shared.noteNewRecentDocumentURL(url)
             workspace.reveal(url)
             persistSession()
@@ -118,17 +152,72 @@ extension AppState {
 
     // MARK: - Close
 
-    /// File → Close Document (⌘W): dirty handling, then back to a fresh
-    /// untitled document (the editor stays mounted).
+    /// File → Close Document (⌘W): dirty handling, then the window goes to
+    /// the empty state (welcome view). It NEVER resets to a phantom
+    /// untitled document.
     @MainActor func closeDocument() {
-        guard prepareToSwitchDocument() else { return }
-        resetToUntitled()
+        guard hasDocument else { return }
+        switch DocumentSwitchPolicy.closeDocumentAction(
+            state: documentState,
+            isDirty: isDirtyForPolicy,
+            autosaveEnabled: settings.autosaveEnabled
+        ) {
+        case .closeToEmpty:
+            enterNoneState()
+        case .saveSilently:
+            saveDocumentSilently()
+            // A failed silent save leaves the document dirty: ask instead of
+            // losing the changes.
+            guard !document.isDirty else { return askToCloseDocument() }
+            enterNoneState()
+        case .askUser:
+            askToCloseDocument()
+        }
     }
 
-    @MainActor private func resetToUntitled() {
+    /// Save / Don't Save / Cancel for ⌘W on a dirty document. Save writes
+    /// (with the location panel for untitled) and the close still happens;
+    /// Don't Save discards (including any hot-exit backup); Cancel keeps
+    /// the document open.
+    @MainActor private func askToCloseDocument() {
+        let alert = NSAlert()
+        alert.messageText = "Do you want to save the changes to “\(document.title)”?"
+        alert.informativeText = "Your changes will be lost if you don’t save them."
+        alert.addButton(withTitle: "Save")
+        alert.addButton(withTitle: "Don’t Save")
+        alert.addButton(withTitle: "Cancel")
+        switch alert.runModal() {
+        case .alertFirstButtonReturn:
+            saveDocument()
+            // A cancelled save panel leaves the document dirty: stay.
+            if !document.isDirty { enterNoneState() }
+        case .alertSecondButtonReturn:
+            enterNoneState()
+        default:
+            break
+        }
+    }
+
+    /// The empty state: no document, welcome view. The caller already saved
+    /// or explicitly discarded the content; any hot-exit backup goes with
+    /// the document (closing clean deletes it).
+    @MainActor private func enterNoneState() {
+        discardUntitledBackup()
+        document.fileURL = nil
+        document.isDirty = false
+        document.pendingMarkdown = nil
+        hasDocument = false
+        persistSession()
+    }
+
+    /// A fresh, empty untitled document (File ▸ New lands here, and only
+    /// here — closing never produces one).
+    @MainActor private func presentFreshUntitled() {
+        discardUntitledBackup()
         document.fileURL = nil
         document.isDirty = false
         document.loadMarkdown("")
+        hasDocument = true
         persistSession()
     }
 
@@ -137,7 +226,11 @@ extension AppState {
     /// File → Open Folder…: pick a workspace root (dirty handling first;
     /// the current document stays open).
     @MainActor func requestOpenFolder() {
-        guard prepareToSwitchDocument() else { return }
+        guard prepareToSwitchDocument(DocumentSwitchPolicy.openDocumentAction(
+            state: documentState,
+            isDirty: isDirtyForPolicy,
+            autosaveEnabled: settings.autosaveEnabled
+        )) else { return }
         let panel = NSOpenPanel()
         panel.canChooseFiles = false
         panel.canChooseDirectories = true
@@ -249,16 +342,12 @@ extension AppState {
 
     // MARK: - Switching rules
 
-    /// Applies the dirty-document switching policy before replacing (or
-    /// backgrounding) the current document. Returns false when the user
+    /// Applies a switching-policy action (dirty-document handling) before
+    /// replacing the current document. Returns false when the user
     /// cancelled — the caller must abort its action.
     @MainActor
-    private func prepareToSwitchDocument() -> Bool {
-        switch DocumentSwitchPolicy.switchAction(
-            isDirty: document.isDirty,
-            hasFileURL: document.fileURL != nil,
-            autosaveEnabled: settings.autosaveEnabled
-        ) {
+    private func prepareToSwitchDocument(_ action: DocumentSwitchPolicy.SwitchAction) -> Bool {
+        switch action {
         case .proceed:
             return true
         case .saveSilently:
@@ -273,8 +362,13 @@ extension AppState {
             alert.addButton(withTitle: "Cancel")
             switch alert.runModal() {
             case .alertFirstButtonReturn:
+                let wasUntitled = document.fileURL == nil
                 saveDocument()
-                // A cancelled save panel leaves the document dirty: abort.
+                // A saved untitled document becomes a real file: stay on it
+                // instead of switching away (VSCode rule). A cancelled save
+                // panel also stays.
+                if wasUntitled { return false }
+                // A failed save leaves the document dirty: abort.
                 return !document.isDirty
             case .alertSecondButtonReturn:
                 return true
@@ -287,7 +381,8 @@ extension AppState {
     // MARK: - Session restore
 
     /// One-shot launch restore: reopens the workspace and document carried in
-    /// this window's `pendingRestore` entry. Missing files/folders are skipped
+    /// this window's `pendingRestore` entry — a file on disk, or an untitled
+    /// document from its hot-exit backup. Missing files/backups are skipped
     /// silently and the session is re-persisted without them.
     @MainActor func restoreSessionIfNeeded() {
         guard !didRestoreSession else { return }
@@ -303,9 +398,29 @@ extension AppState {
         if let file = entry.fileURL, FileManager.default.fileExists(atPath: file.path) {
             securityScope.ensureAccess(to: file)
             openDocument(at: file)
+        } else if let backupID = entry.untitledBackupID,
+                  let content = hotExitStore.restore(id: backupID) {
+            // Hot exit: the untitled document comes back with its content,
+            // marked dirty — it exists nowhere on disk. The backup stays
+            // (referenced by this window) until save / discard / clean close.
+            document.fileURL = nil
+            document.loadMarkdown(content)
+            document.isDirty = true
+            untitledBackupID = backupID
+            hasDocument = true
         }
         // Rewrites the bookmarks, clearing anything that failed to resolve.
         persistSession()
+    }
+
+    /// This window's persisted session entry: the open file, or the untitled
+    /// document's hot-exit backup, plus the workspace root.
+    var windowSession: WindowSession {
+        WindowSession(
+            fileURL: hasDocument ? document.fileURL : nil,
+            workspaceRoot: workspaceRoot,
+            untitledBackupID: hasDocument ? untitledBackupID : nil
+        )
     }
 
     /// Persists the session for every open window (this window included).
@@ -316,17 +431,11 @@ extension AppState {
     func persistSession() {
         let states = WindowRegistry.shared.registeredAppStates
         guard !states.isEmpty else {
-            SessionRestore.persist(
-                windows: [WindowSession(fileURL: document.fileURL, workspaceRoot: workspaceRoot)],
-                defaults: userDefaults
-            )
+            SessionRestore.persist(windows: [windowSession], defaults: userDefaults)
             return
         }
         guard states.contains(where: { $0 === self }) else { return }
-        SessionRestore.persist(
-            windows: states.map { WindowSession(fileURL: $0.document.fileURL, workspaceRoot: $0.workspaceRoot) },
-            defaults: userDefaults
-        )
+        WindowRegistry.shared.persistSession(defaults: userDefaults)
     }
 
     // MARK: - Helpers

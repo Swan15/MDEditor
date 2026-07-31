@@ -8,20 +8,43 @@ struct ContentView: View {
         NavigationSplitView {
             SidebarView()
         } detail: {
-            VStack(spacing: 0) {
-                MarkdownTextView(appState: appState)
-                Divider()
-                StatusBarView(document: appState.document)
+            if appState.hasDocument {
+                VStack(spacing: 0) {
+                    MarkdownTextView(appState: appState)
+                    Divider()
+                    StatusBarView(document: appState.document)
+                }
+            } else {
+                WelcomeView()
             }
         }
-        .navigationTitle(appState.document.isDirty ? "\(appState.document.title) •" : appState.document.title)
+        .navigationTitle(windowTitle)
         .navigationSubtitle(appState.workspaceRoot?.lastPathComponent ?? "")
-        .toolbar { formattingToolbar }
+        .toolbar { toolbarContent }
         .onChange(of: appState.document.fileURL, initial: true) { _, newURL in
             // Reveal files opened via ⌘O / recents / Save As in the sidebar.
             if let newURL {
                 appState.workspace.reveal(newURL)
             }
+        }
+        .onChange(of: appState.hasDocument) { _, _ in
+            // The editor just (un)mounted without a focus change: re-assert
+            // the format-bus target (nil in the empty state).
+            WindowRegistry.shared.retargetIfMain(appState: appState)
+        }
+    }
+
+    /// Document title (with dirty marker), or the app name in the empty state.
+    private var windowTitle: String {
+        guard appState.hasDocument else { return "MDEditor" }
+        return appState.document.isDirty ? "\(appState.document.title) •" : appState.document.title
+    }
+
+    /// The formatting cluster only exists with a document open.
+    @ToolbarContentBuilder
+    private var toolbarContent: some ToolbarContent {
+        if appState.hasDocument {
+            formattingToolbar
         }
     }
 

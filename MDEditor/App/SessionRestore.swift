@@ -1,6 +1,7 @@
 import Foundation
 
-/// One window's restorable state: the open file and/or workspace root.
+/// One window's restorable state: the open file and/or workspace root, or
+/// the hot-exit backup of an untitled document.
 /// Crosses `openWindow(value:)` (Hashable + Codable) at launch, so each
 /// window carries its own restore data.
 struct WindowSession: Codable, Hashable {
@@ -10,14 +11,19 @@ struct WindowSession: Codable, Hashable {
     var id = UUID()
     var fileURL: URL?
     var workspaceRoot: URL?
+    /// Hot-exit backup holding this window's untitled document's content
+    /// (a UUID into `HotExitStore`). Mutually exclusive with `fileURL` —
+    /// a window's document is either file-backed or untitled.
+    var untitledBackupID: UUID?
 
     /// True when there's anything to restore (an empty value marks a plain
     /// new window).
-    var hasContent: Bool { fileURL != nil || workspaceRoot != nil }
+    var hasContent: Bool { fileURL != nil || workspaceRoot != nil || untitledBackupID != nil }
 
-    init(fileURL: URL? = nil, workspaceRoot: URL? = nil) {
+    init(fileURL: URL? = nil, workspaceRoot: URL? = nil, untitledBackupID: UUID? = nil) {
         self.fileURL = fileURL
         self.workspaceRoot = workspaceRoot
+        self.untitledBackupID = untitledBackupID
     }
 }
 
@@ -34,10 +40,14 @@ enum SessionRestore {
     private static let fileBookmarkKey = "restore.openFileBookmark"
     private static let workspaceBookmarkKey = "restore.workspaceBookmark"
 
-    /// Storage form of one window: bookmark data survives the sandbox.
+    /// Storage form of one window: bookmark data survives the sandbox. The
+    /// untitled backup ID is a plain UUID (backups live in the app's own
+    /// container, no bookmark needed); absent in pre-hot-exit sessions and
+    /// decodes as nil there.
     private struct StoredWindow: Codable {
         var file: Data?
         var workspace: Data?
+        var untitledBackupID: UUID?
     }
 
     /// Writes the session for all open windows, most-recently-main first;
@@ -46,7 +56,8 @@ enum SessionRestore {
         let stored = windows.map {
             StoredWindow(
                 file: $0.fileURL.flatMap(bookmarkData(for:)),
-                workspace: $0.workspaceRoot.flatMap(bookmarkData(for:))
+                workspace: $0.workspaceRoot.flatMap(bookmarkData(for:)),
+                untitledBackupID: $0.untitledBackupID
             )
         }
         defaults.set(try? JSONEncoder().encode(stored), forKey: windowsKey)
@@ -61,7 +72,8 @@ enum SessionRestore {
             let entries = stored.compactMap { window -> WindowSession? in
                 let entry = WindowSession(
                     fileURL: window.file.flatMap(resolve(_:)),
-                    workspaceRoot: window.workspace.flatMap(resolve(_:))
+                    workspaceRoot: window.workspace.flatMap(resolve(_:)),
+                    untitledBackupID: window.untitledBackupID
                 )
                 return entry.hasContent ? entry : nil
             }

@@ -58,10 +58,12 @@ struct MDEditorApp: App {
     }
 
     /// File operations on the main window's document and workspace
-    /// (disabled with no window open; New Window always works). Everything
-    /// that swaps documents routes through the dirty-switching rules.
+    /// (disabled with no window open; New Window always works; document
+    /// actions disable in the empty state). Everything that swaps documents
+    /// routes through the dirty-switching rules.
     private var fileCommands: some Commands {
         Group {
+            let hasDocument = registry.mainAppState?.hasDocument ?? false
             CommandGroup(replacing: .newItem) {
                 Button("New") { registry.mainAppState?.requestNewDocument() }
                     .keyboardShortcut("n")
@@ -77,21 +79,21 @@ struct MDEditorApp: App {
                 Divider()
                 Button("Close Document") { registry.mainAppState?.closeDocument() }
                     .keyboardShortcut("w")
-                    .disabled(registry.mainAppState == nil)
+                    .disabled(!hasDocument)
             }
             CommandGroup(replacing: .saveItem) {
                 Button("Save") { registry.mainAppState?.saveDocument() }
                     .keyboardShortcut("s")
-                    .disabled(registry.mainAppState == nil)
+                    .disabled(!hasDocument)
                 Button("Save As…") { registry.mainAppState?.saveDocumentAs() }
                     .keyboardShortcut("s", modifiers: [.command, .shift])
-                    .disabled(registry.mainAppState == nil)
+                    .disabled(!hasDocument)
                 Divider()
                 Button("Export as PDF…") { registry.mainAppState?.exportPDF() }
-                    .disabled(registry.mainAppState == nil)
+                    .disabled(!hasDocument)
                 Button("Print…") { registry.mainAppState?.printDocument() }
                     .keyboardShortcut("p")
-                    .disabled(registry.mainAppState == nil)
+                    .disabled(!hasDocument)
             }
         }
     }

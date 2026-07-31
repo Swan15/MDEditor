@@ -153,6 +153,45 @@ final class SessionRestoreTests: XCTestCase {
         XCTAssertNil(legacy.workspace)
     }
 
+    // MARK: - Hot-exit backup references
+
+    /// An entry carrying only an untitled backup ID (hot-exited window)
+    /// round-trips and counts as restorable content.
+    func testBackupIDOnlyEntryRoundTrips() throws {
+        let defaults = try makeDefaults()
+        let backupID = UUID()
+
+        SessionRestore.persist(windows: [WindowSession(untitledBackupID: backupID)], defaults: defaults)
+        let entries = SessionRestore.restoreWindowEntries(defaults: defaults)
+
+        XCTAssertEqual(entries.count, 1)
+        XCTAssertEqual(entries[0].untitledBackupID, backupID)
+        XCTAssertNil(entries[0].fileURL)
+        XCTAssertTrue(entries[0].hasContent)
+    }
+
+    /// Sessions written before hot exit existed (no backup key in the
+    /// stored JSON) still decode — the ID simply reads back as nil.
+    func testPreHotExitSessionFormatDecodes() throws {
+        let dir = try makeTempDir()
+        removeOnExit(dir)
+        let file = dir.appendingPathComponent("doc.md")
+        try Data().write(to: file)
+        let defaults = try makeDefaults()
+        let bookmark = try XCTUnwrap(SessionRestore.bookmarkData(for: file))
+        // The old StoredWindow shape: file/workspace bookmarks only (Data
+        // goes into JSON as base64, JSONEncoder's default).
+        let oldFormat: [[String: Any]] = [["file": bookmark.base64EncodedString()]]
+        let data = try JSONSerialization.data(withJSONObject: oldFormat)
+        defaults.set(data, forKey: "restore.windows")
+
+        let entries = SessionRestore.restoreWindowEntries(defaults: defaults)
+
+        XCTAssertEqual(entries.count, 1)
+        assertSameLocation(entries[0].fileURL, file)
+        XCTAssertNil(entries[0].untitledBackupID, "the missing key decodes as nil")
+    }
+
     // MARK: - AppState restore
 
     @MainActor
@@ -166,6 +205,7 @@ final class SessionRestoreTests: XCTestCase {
         let appState = AppState(userDefaults: defaults, restore: WindowSession(fileURL: file))
         appState.restoreSessionIfNeeded()
 
+        XCTAssertTrue(appState.hasDocument)
         XCTAssertEqual(appState.document.fileURL, file.standardizedFileURL)
         XCTAssertEqual(appState.document.pendingMarkdown, "# Restored")
         XCTAssertFalse(appState.document.isDirty)
@@ -203,6 +243,7 @@ final class SessionRestoreTests: XCTestCase {
         let appState = AppState(userDefaults: defaults, restore: WindowSession(fileURL: file))
         appState.restoreSessionIfNeeded()
 
+        XCTAssertFalse(appState.hasDocument, "a failed restore leaves the window in the empty state")
         XCTAssertNil(appState.document.fileURL)
         XCTAssertTrue(
             SessionRestore.restoreWindowEntries(defaults: defaults).isEmpty,

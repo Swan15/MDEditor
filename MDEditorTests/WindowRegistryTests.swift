@@ -146,4 +146,32 @@ final class WindowRegistryTests: XCTestCase {
     func testEmptyWindowSessionsAreUnique() {
         XCTAssertNotEqual(WindowSession(), WindowSession())
     }
+
+    /// Duplicate-open detection: the registry finds the OTHER window already
+    /// showing a file, so the opener can focus it instead of duplicating.
+    @MainActor
+    func testRecordWithOpenFileFindsOtherWindowOnly() throws {
+        let registry = WindowRegistry(bus: FormatCommandBus())
+        let (s1, _) = try makeState()
+        let (s2, _) = try makeState()
+        let w1 = makeWindow()
+        let w2 = makeWindow()
+        registry.attach(window: w1, appState: s1)
+        registry.attach(window: w2, appState: s2)
+        let dir = FileManager.default.temporaryDirectory
+            .appendingPathComponent("MDEditorRegistryTests-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        addTeardownBlock { try? FileManager.default.removeItem(at: dir) }
+        let file = dir.appendingPathComponent("doc.md")
+        try "content".write(to: file, atomically: true, encoding: .utf8)
+        s1.openDocument(at: file)
+        let url = file.standardizedFileURL
+
+        XCTAssertTrue(registry.record(withOpenFile: url, otherThan: s2)?.appState === s1)
+        XCTAssertNil(
+            registry.record(withOpenFile: url, otherThan: s1),
+            "the window holding the file is excluded (same-window re-open is a separate no-op)"
+        )
+        XCTAssertNil(registry.record(withOpenFile: URL(fileURLWithPath: "/tmp/none-\(UUID().uuidString).md"), otherThan: s2))
+    }
 }

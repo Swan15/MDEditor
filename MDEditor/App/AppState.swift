@@ -11,8 +11,21 @@ final class AppState {
     /// watcher and persisted session stay in sync.
     var workspaceRoot: URL?
 
-    /// The document currently loaded in the editor.
+    /// The document currently loaded in the editor. The model always exists
+    /// (the editor, autosave and status bar bind to it once); whether the
+    /// window HAS a document is `hasDocument` — with none open, the welcome
+    /// view takes the editor's place and the model holds no content.
     var document = DocumentModel()
+
+    /// True when the window presents a document; false shows the VSCode-style
+    /// welcome view (the "none" state — a new window starts here, and
+    /// File ▸ Close Document (⌘W) returns to it).
+    var hasDocument = false
+
+    /// Hot-exit backup holding this window's untitled document's content
+    /// (written when a dirty untitled document's window closes or the app
+    /// quits; deleted on save, explicit Don't Save, or clean close).
+    var untitledBackupID: UUID?
 
     /// Security-scoped folder access held for the session (image loading
     /// and asset creation next to single-file documents).
@@ -27,6 +40,9 @@ final class AppState {
 
     /// Idle autosave for dirty documents with a file on disk.
     let autosaveController: AutosaveController
+
+    /// Hot-exit backup storage (injected directory in tests).
+    let hotExitStore: HotExitStore
 
     /// Guards the one-shot session restore on launch.
     var didRestoreSession = false
@@ -44,10 +60,16 @@ final class AppState {
     /// Defaults backing settings and session restore (injectable for tests).
     @ObservationIgnored let userDefaults: UserDefaults
 
-    init(userDefaults: UserDefaults = .standard, settings: AppSettings? = nil, restore: WindowSession? = nil) {
+    init(
+        userDefaults: UserDefaults = .standard,
+        settings: AppSettings? = nil,
+        restore: WindowSession? = nil,
+        hotExitStore: HotExitStore = .shared
+    ) {
         self.userDefaults = userDefaults
         self.settings = settings ?? AppSettings(defaults: userDefaults)
         self.pendingRestore = restore
+        self.hotExitStore = hotExitStore
         self.workspace = WorkspaceModel()
         self.autosaveController = AutosaveController()
         // The style engine derives its fonts from the preferences; the
@@ -57,5 +79,79 @@ final class AppState {
         autosaveController.configure(document: document, settings: self.settings) { [weak self] in
             self?.saveDocumentSilently()
         }
+    }
+
+    // MARK: - Lifecycle state
+
+    /// What the window presents right now (the lifecycle policy's input).
+    var documentState: DocumentSwitchPolicy.DocumentState {
+        guard hasDocument else { return .none }
+        return document.fileURL == nil ? .untitled : .file
+    }
+
+    /// Dirty flag for lifecycle decisions: an untitled document counts as
+    /// dirty only while it holds any content (VSCode rule — an empty
+    /// untitled document is clean), a file-backed document uses the edited
+    /// flag, and the none state is never dirty.
+    var isDirtyForPolicy: Bool {
+        switch documentState {
+        case .none: return false
+        case .file: return document.isDirty
+        case .untitled: return documentHasContent
+        }
+    }
+
+    /// True when the untitled document holds any (non-whitespace) content.
+    private var documentHasContent: Bool {
+        guard let markdown = document.serializedMarkdown() else { return false }
+        return !markdown.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    }
+
+    // MARK: - Hot-exit backups
+
+    /// Serializes the untitled document into the hot-exit store (creating
+    /// its backup ID on first stash, reusing it afterwards). No-op when the
+    /// window has no untitled document with content.
+    func stashUntitledBackup() {
+        guard documentState == .untitled, let content = document.serializedMarkdown() else { return }
+        let id = untitledBackupID ?? UUID()
+        hotExitStore.stash(content: content, id: id)
+        untitledBackupID = id
+    }
+
+    /// Deletes the untitled document's hot-exit backup, if any (save to a
+    /// real file, explicit Don't Save, or a clean close). Idempotent.
+    func discardUntitledBackup() {
+        if let id = untitledBackupID {
+            hotExitStore.delete(id: id)
+            untitledBackupID = nil
+        }
+    }
+
+    /// Gets this window's document ready for the app to terminate without
+    /// asking: a dirty file covered by autosave saves silently; a dirty
+    /// untitled document stashes its hot-exit backup; an untitled document
+    /// that was emptied since its backup was stashed drops the stale backup.
+    func prepareForTermination() {
+        switch documentState {
+        case .none:
+            break
+        case .file:
+            if document.isDirty && settings.autosaveEnabled {
+                saveDocumentSilently()
+            }
+        case .untitled:
+            if isDirtyForPolicy {
+                stashUntitledBackup()
+            } else {
+                discardUntitledBackup()
+            }
+        }
+    }
+
+    /// True when a dirty file document still needs the user's Save /
+    /// Don't Save / Cancel decision (autosave off, or a failed silent save).
+    var needsUnsavedFileChangesAlert: Bool {
+        documentState == .file && document.isDirty
     }
 }

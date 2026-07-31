@@ -138,6 +138,10 @@ extension MarkdownTextView {
             // Per-window registration; the registry installs this coordinator
             // as the bus target whenever its window is main.
             appState.formatTarget = self
+            // The editor remounts when a document opens in the empty state;
+            // if this window is already main, no focus change will fire to
+            // retarget the bus — re-assert the target now.
+            WindowRegistry.shared.retargetIfMain(appState: appState)
         }
 
         /// Typing attributes for plain body text.

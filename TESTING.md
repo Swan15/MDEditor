@@ -4,8 +4,8 @@ Run through this before shipping a build. Check items off in order; note anythin
 
 ## Launch
 
-- [ ] App launches to an empty "Untitled" document; cursor is in the editor.
-- [ ] Status bar at the bottom shows "Untitled", "0 words", "0 characters", no modified dot.
+- [ ] With no session to restore, the app launches to the welcome view (no document): app icon and name, "New Document" (⌘N) and "Open…" (⌘O) actions, and a Recent list matching File ▸ Open Recent (empty on first run). The formatting toolbar and status bar are hidden and the window title is "MDEditor".
+- [ ] New Document (⌘N) from the welcome view opens a fresh "Untitled" document: cursor is in the editor; the status bar shows "Untitled", "0 words", "0 characters", no modified dot; the toolbar appears.
 - [ ] The window cannot be resized below 480×560 pt: dragging a corner past that point stops (the sidebar, editor and status bar stay usable).
 
 ## Formatting (toolbar, Format menu, shortcuts)
@@ -73,22 +73,27 @@ Run through this before shipping a build. Check items off in order; note anythin
 ## Window close and quit with unsaved changes
 
 - [ ] The red close button is enabled. Closing a clean window closes it immediately; closing the LAST window leaves the app running (the dock icon stays; File ▸ New Window or clicking the dock icon reopens a window).
-- [ ] Dirty untitled document, click the red button: an alert offers Save / Don't Save / Cancel. Save shows the save panel → the window closes after saving; cancelling that panel aborts the close. Don't Save closes without saving. Cancel aborts the close.
+- [ ] Dirty untitled document, click the red button: NO alert — the window closes immediately (hot exit). Quit and relaunch: the window restores with the untitled document, its content intact and marked dirty.
+- [ ] Relaunch with a restored untitled document and close the window again without editing: still no alert, and the content restores again on the next launch (the backup survives repeat hot exits).
+- [ ] Restore an untitled backup, delete ALL its content, close the window: closes immediately (empty untitled = clean) and the backup is deleted — relaunch does NOT bring the document back.
+- [ ] Restore an untitled backup, then ⌘S and pick a location: the document becomes a real file (the backup is retired); relaunch restores the file, not a backup.
 - [ ] Dirty saved file with autosave ON (default), click the red button: saves silently and closes (no alert; the file on disk has the change).
-- [ ] Dirty saved file with autosave OFF, click the red button: the alert appears (same behavior as the untitled case).
-- [ ] Dirty untitled document, quit (⌘Q): alert offers Save / Don't Save / Cancel. Save shows the save panel → quits after saving; cancelling that panel aborts the quit. Don't Save quits without saving. Cancel aborts the quit.
+- [ ] Dirty saved file with autosave OFF, click the red button: an alert offers Save / Don't Save / Cancel. Save shows the save flow → the window closes after saving; Don't Save closes without saving; Cancel aborts the close.
+- [ ] Dirty untitled document, quit (⌘Q): NO alert — the app quits immediately, and relaunch restores the untitled document with its content (hot exit).
 - [ ] Dirty saved file with autosave ON (default), quit: saves silently and quits (no alert; the file on disk has the change).
-- [ ] Dirty saved file with autosave OFF, quit: the alert appears (same behavior as the untitled case).
+- [ ] Dirty saved file with autosave OFF, quit: an alert offers Save / Don't Save / Cancel. Save saves and quits; Don't Save quits without saving; Cancel aborts the quit.
 
 ## Multiple windows
 
-- [ ] File ▸ New Window (⌥⇧⌘N) opens a second, fully independent window (fresh Untitled, own sidebar). Repeat for a third. ⌘N (New Document) still replaces the CURRENT window's document after the dirty check.
+- [ ] File ▸ New Window (⌥⇧⌘N) opens a second, fully independent window (welcome view, own sidebar). Repeat for a third. ⌘N (New Document) replaces the CURRENT window's document (after the dirty check) or fills its empty state.
 - [ ] Type different text in each window: each keeps its own content, dirty dot and window title. With each saved to its own file, each window's autosave saves its own document independently.
 - [ ] With two windows side by side, click one to focus it, then use Format ▸ Bold, the toolbar and Insert ▸ Image…: only the KEY window's editor changes; the background window's content is never touched. File ▸ Open… / Open Recent / Save / Save As… likewise act on the key window only.
-- [ ] Close a background window with unsaved changes via its red button: the dirty prompt names THAT window's document.
+- [ ] With a file open in window A, open the SAME file in window B (File ▸ Open…, Open Recent or a sidebar click): window A comes to the front and B keeps its current document — no duplicate opens.
+- [ ] Close a background window with unsaved changes via its red button: a dirty file without autosave prompts and the alert names THAT window's document; a dirty untitled document just closes (hot exit — it comes back on relaunch).
 - [ ] Close all windows: the app keeps running. With no window open, File ▸ New / Open… / Save and the Format / Insert menus are disabled (no crashes), while File ▸ New Window stays enabled and reopens a window.
 - [ ] Two windows with different files open, quit (⌘Q) and relaunch: BOTH windows restore, each with its document (and workspace, if any). Close one window first, then quit and relaunch: only the remaining window restores.
-- [ ] ⌘Q with two dirty windows: an alert appears per dirty window in turn (each window comes to the front for its alert); Save / Don't Save / Cancel is answered per window and Cancel in any alert aborts the whole quit. Mixed case (one dirty saved file with autosave ON + one dirty untitled): the file saves silently and only the untitled one asks. (Restore is capped at 8 windows — covered by tests, impractical to check by hand.)
+- [ ] One window with a dirty untitled document and one with a saved file, quit (⌘Q) and relaunch: the untitled window restores with its content (hot exit, no alert at quit) and the file window restores from disk.
+- [ ] ⌘Q with two dirty FILE windows and autosave OFF: an alert appears per dirty window in turn (each window comes to the front for its alert); Save / Don't Save / Cancel is answered per window and Cancel in any alert aborts the whole quit. Mixed case (one dirty saved file with autosave ON + one dirty untitled): nothing asks — the file saves silently and the untitled one stashes its hot-exit backup. (Restore is capped at 8 windows — covered by tests, impractical to check by hand.)
 
 ## Tables
 
@@ -154,10 +159,14 @@ Run through this before shipping a build. Check items off in order; note anythin
 
 - [ ] File → Save As… (⇧⌘S) always asks for a location; the window title follows the new name and saving keeps working there.
 - [ ] File → Open Recent lists recently opened/saved files; picking one opens it; Clear Menu empties the list.
-- [ ] File → Close Document (⌘W) resets to a fresh Untitled document; the editor stays put. (Verify ⌘W triggers Close Document, not the system window close.)
+- [ ] File → Close Document (⌘W) closes the document and leaves the window on the welcome view (app icon, New/Open actions, recents); the toolbar and status bar hide and the window title resets to "MDEditor". It never resets to a phantom "Untitled" document. (Verify ⌘W triggers Close Document, not the system window close.)
+- [ ] ⌘W on a dirty untitled document: an alert offers Save / Don't Save / Cancel. Save shows the save panel → after saving, the window still closes to the welcome view (the file is in Open Recent). Don't Save discards the content (and any hot-exit backup for it) → welcome view. Cancel keeps the document.
+- [ ] ⌘W on a dirty file with autosave ON: saves silently, then the welcome view (the file on disk has the change). With autosave OFF: the same Save / Don't Save / Cancel alert as above.
+- [ ] File → New (⌘N) on a dirty untitled document: the same alert — but Save runs the save panel and STAYS on the newly saved file (no new document is created); Don't Save discards to a fresh untitled; Cancel keeps the document.
 - [ ] Dirty-switching with autosave ON (the default): edit a saved file, then File → Open… or click another file in the sidebar — the old file is saved silently (no prompt) and the switch happens. The dirty dot never appears for the old file.
 - [ ] Dirty-switching with autosave OFF (defaults write: `defaults write com.mdeditor.app settings.autosaveEnabled -bool false`, relaunch): edit a saved file, then open another — an alert offers Save / Don't Save / Cancel. Save saves and switches; Don't Save switches without saving (reopening the old file shows the pre-edit content); Cancel aborts the switch.
 - [ ] Same alert for a dirty **untitled** document even with autosave ON (there's no file to save silently to). Choosing Save and then cancelling the save panel aborts the switch.
+- [ ] With no document open (welcome view), File ▸ Close Document / Save / Save As… / Export as PDF… / Print… are disabled; New and Open… stay enabled. Clicking a file in the welcome view's Recent list opens it.
 - [ ] Autosave: edit a saved file and pause ~2 s — the dirty dot clears by itself and the file on disk has the change (check in another editor). An untitled document is never autosaved.
 
 ## Workspace (folder mode)
