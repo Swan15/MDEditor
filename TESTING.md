@@ -22,7 +22,7 @@ Run through this before shipping a build. Check items off in order; note anythin
 ## Layout
 
 - [ ] Paragraphs and headings have clear breathing room between blocks (about half a line after body paragraphs, more around headings); list items within one list stay tight (no gap between items).
-- [ ] Resize the window wide and narrow: text always wraps at the editor width and no horizontal scrollbar ever appears — including at launch, before any resize.
+- [ ] Resize the window wide and narrow: beyond the max width (default 760 pt) the text column stops growing and centers with even side margins; below it the column fills the editor. Text always wraps at the column edge and no horizontal scrollbar ever appears — including at launch, before any resize. Images, rules and tables stay inside the column at every width.
 
 ## Editing behaviors
 
@@ -52,11 +52,12 @@ Run through this before shipping a build. Check items off in order; note anythin
 
 ## Settings (⌘,)
 
-- [ ] Settings opens with ⌘, and shows General (Autosave, Autoformat, Typewriter scrolling) and Appearance (Theme, Editor font, Font size).
+- [ ] Settings opens with ⌘, and shows General (Autosave, Autoformat, Typewriter scrolling) and Appearance (Theme, Editor font, Font size, Limit editor width, Max width).
 - [ ] Toggling each preference persists across relaunch (check `defaults read com.mdeditor.app` or just relaunch).
 - [ ] Theme: Light and Dark force the app appearance regardless of the system; System follows the OS. All text, tables, code backgrounds and placeholders stay legible in each.
 - [ ] Editor font: New York gives a serif body, SF Mono a monospaced body; code blocks and inline code stay monospaced in every choice; bold/italic still render (and save) correctly in each font.
 - [ ] Font size stepper (11–18 pt): the whole document restyles live — body, headings (proportionally smaller/larger, still descending H1→H6), lists, quotes, tables. No dirty dot appears from the restyle alone.
+- [ ] Limit editor width ON (default): in a wide window the text column caps at the Max width and centers with even margins. The Max width stepper (560–1200 pt, 20 pt steps, greyed out while the toggle is off) re-centers every open window live. OFF: the column fills the window width edge to edge (minus the usual padding), as before.
 
 ## Export & print
 

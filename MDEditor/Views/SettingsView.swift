@@ -28,6 +28,14 @@ struct SettingsView: View {
                     in: AppSettings.fontSizeRange,
                     step: 1
                 )
+                Toggle("Limit editor width", isOn: $settings.limitEditorWidth)
+                Stepper(
+                    "Max width: \(Int(settings.editorMaxWidth)) pt",
+                    value: $settings.editorMaxWidth,
+                    in: AppSettings.editorMaxWidthRange,
+                    step: 20
+                )
+                .disabled(!settings.limitEditorWidth)
             }
         }
         .formStyle(.grouped)

@@ -318,12 +318,14 @@ final class EditorRegressionTests: XCTestCase {
 
     // MARK: - Bug 3: container width tracks the scroll view
 
-    /// The editor's TextKit 1 stack inside a real (offscreen) window: the
-    /// container width must track the scroll view's content width across
-    /// resizes, and no horizontal scroller may appear. Mirrors
-    /// `MarkdownTextView.makeNSView`, including the clip-view observer.
+    /// The editor's TextKit 1 stack inside a real (offscreen) window: with
+    /// the width limit on (default cap 760) the container caps at the column
+    /// width and the insets center it; below the cap — and with the limit
+    /// off — it tracks the scroll view width as before. No horizontal
+    /// scroller may ever appear. Mirrors `MarkdownTextView.makeNSView`,
+    /// including the clip-view observer and the settings observation.
     @MainActor
-    func testContainerTracksScrollViewWidthAcrossResize() throws {
+    func testContainerTracksScrollViewWidthAcrossResize() async throws {
         let appState = AppState(userDefaults: try makeDefaults())
         let storage = NSTextStorage()
         storage.setAttributedString(AttributedStringBuilder.build(MarkdownParser.parse(
@@ -334,8 +336,9 @@ final class EditorRegressionTests: XCTestCase {
         let container = NSTextContainer(size: NSSize(width: 0, height: CGFloat.greatestFiniteMagnitude))
         layoutManager.addTextContainer(container)
         let textView = MDTextView(frame: NSRect(x: 0, y: 0, width: 720, height: 480), textContainer: container)
-        textView.textContainerInset = NSSize(width: 20, height: 24)
-        container.widthTracksTextView = true
+        textView.textContainerInset = NSSize(width: ColumnLayout.baseInset, height: 24)
+        textView.columnWidthLimit = appState.settings.limitEditorWidth ? appState.settings.editorMaxWidth : nil
+        container.widthTracksTextView = false
         textView.isHorizontallyResizable = false
         textView.isVerticallyResizable = true
         textView.minSize = NSSize.zero
@@ -349,6 +352,7 @@ final class EditorRegressionTests: XCTestCase {
 
         let coordinator = MarkdownTextView.Coordinator(appState: appState)
         coordinator.textView = textView
+        coordinator.observeSettingsIfNeeded()
         appState.document.textStorage = storage
         scrollView.contentView.postsBoundsChangedNotifications = true
         NotificationCenter.default.addObserver(
@@ -365,14 +369,19 @@ final class EditorRegressionTests: XCTestCase {
         window.contentView = scrollView
         window.layoutIfNeeded()
 
-        func assertTracks(_ expectedContentWidth: CGFloat, _ label: String) {
+        func assertColumn(container expectedContainer: CGFloat, inset expectedInset: CGFloat, _ label: String) {
+            // Two passes: after a resize the vertical scroller can flash
+            // (legacy scroller style in the test host eats 15 pt while
+            // visible), and the re-tile that hides it needs its own pass.
+            window.layoutIfNeeded()
             window.layoutIfNeeded()
             let contentWidth = scrollView.contentSize.width
-            XCTAssertEqual(contentWidth, expectedContentWidth, accuracy: 1, "\(label): content width")
             XCTAssertEqual(textView.frame.width, contentWidth, accuracy: 1,
                            "\(label): text view fills the clip view")
-            XCTAssertEqual(container.size.width, textView.frame.width - textView.textContainerInset.width * 2,
-                           accuracy: 1, "\(label): container tracks the text view")
+            XCTAssertEqual(container.size.width, expectedContainer, accuracy: 1,
+                           "\(label): container width")
+            XCTAssertEqual(textView.textContainerInset.width, expectedInset, accuracy: 1,
+                           "\(label): centering inset")
             XCTAssertFalse(scrollView.hasHorizontalScroller, "\(label): no horizontal scroller")
             layoutManager.ensureLayout(for: container)
             let used = layoutManager.usedRect(for: container)
@@ -380,11 +389,33 @@ final class EditorRegressionTests: XCTestCase {
                                      "\(label): glyphs never exceed the container width")
         }
 
-        assertTracks(800, "initial")
+        /// Lets the coordinator's settings-observation Task run (it hops to
+        /// the main actor; both queued tasks must drain before asserting).
+        func pumpMainQueue() async {
+            await Task { @MainActor in }.value
+            await Task { @MainActor in }.value
+        }
+
+        // Limit on (default cap 760): 800 caps exactly, 1200 centers, 500
+        // falls below the cap and fills the width as before. The window
+        // height stays constant: shrinking it with a document taller than
+        // the view would flash the vertical scroller mid-assertion.
+        assertColumn(container: 760, inset: 20, "initial 800 (at the cap)")
+        window.setContentSize(NSSize(width: 1200, height: 600))
+        assertColumn(container: 760, inset: 220, "wider 1200 (centered)")
         window.setContentSize(NSSize(width: 500, height: 600))
-        assertTracks(500, "narrower")
-        window.setContentSize(NSSize(width: 1000, height: 700))
-        assertTracks(1000, "wider")
+        assertColumn(container: 460, inset: 20, "narrower 500 (below the cap)")
+
+        // Changing the preferences re-lays out live, without any resize —
+        // the same observation seam the font settings use.
+        window.setContentSize(NSSize(width: 1200, height: 600))
+        appState.settings.editorMaxWidth = 600
+        await pumpMainQueue()
+        assertColumn(container: 600, inset: 300, "cap changed to 600 (live)")
+        appState.settings.limitEditorWidth = false
+        await pumpMainQueue()
+        assertColumn(container: 1160, inset: 20, "limit off (old behavior)")
+
         NotificationCenter.default.removeObserver(coordinator)
         window.orderOut(nil)
     }

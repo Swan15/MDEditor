@@ -54,6 +54,8 @@ final class AppSettings {
     private static let appearanceKey = "settings.appearance"
     private static let fontSizeKey = "settings.editorFontSize"
     private static let fontChoiceKey = "settings.editorFontChoice"
+    private static let limitEditorWidthKey = "settings.limitEditorWidth"
+    private static let editorMaxWidthKey = "settings.editorMaxWidth"
     private static let lastUpdateCheckKey = "settings.lastUpdateCheck"
     private static let skippedUpdateVersionKey = "settings.skippedUpdateVersion"
 
@@ -62,6 +64,12 @@ final class AppSettings {
 
     /// Allowed editor font size range (Settings stepper).
     static let fontSizeRange: ClosedRange<CGFloat> = 11...18
+
+    /// Default text-column cap (points) when width limiting is on.
+    static let defaultEditorMaxWidth: CGFloat = 760
+
+    /// Allowed column cap range (Settings stepper).
+    static let editorMaxWidthRange: ClosedRange<CGFloat> = 560...1200
 
     /// Automatically saves dirty documents ~1.5 s after the last edit, but
     /// only documents that already have a file on disk. Default ON.
@@ -104,6 +112,22 @@ final class AppSettings {
         didSet { defaults.set(editorFontChoice.rawValue, forKey: Self.fontChoiceKey) }
     }
 
+    /// Word-like max-width text column: above `editorMaxWidth` the text
+    /// stops growing and centers instead of filling the window. Default ON.
+    var limitEditorWidth: Bool {
+        didSet { defaults.set(limitEditorWidth, forKey: Self.limitEditorWidthKey) }
+    }
+
+    /// Text-column cap in points when `limitEditorWidth` is on (clamped to
+    /// `editorMaxWidthRange`). Default 760.
+    var editorMaxWidth: CGFloat {
+        didSet {
+            let clamped = min(max(editorMaxWidth, Self.editorMaxWidthRange.lowerBound), Self.editorMaxWidthRange.upperBound)
+            if clamped != editorMaxWidth { editorMaxWidth = clamped }
+            defaults.set(Double(clamped), forKey: Self.editorMaxWidthKey)
+        }
+    }
+
     /// Last time an update check was attempted (automatic checks throttle
     /// to at most one attempt per 20 h against this).
     var lastUpdateCheck: Date? {
@@ -127,6 +151,9 @@ final class AppSettings {
         let size = defaults.object(forKey: Self.fontSizeKey) as? Double ?? Double(Self.defaultFontSize)
         self.editorFontSize = min(max(CGFloat(size), Self.fontSizeRange.lowerBound), Self.fontSizeRange.upperBound)
         self.editorFontChoice = EditorFontChoice(rawValue: defaults.string(forKey: Self.fontChoiceKey) ?? "") ?? .system
+        self.limitEditorWidth = defaults.object(forKey: Self.limitEditorWidthKey) as? Bool ?? true
+        let maxWidth = defaults.object(forKey: Self.editorMaxWidthKey) as? Double ?? Double(Self.defaultEditorMaxWidth)
+        self.editorMaxWidth = min(max(CGFloat(maxWidth), Self.editorMaxWidthRange.lowerBound), Self.editorMaxWidthRange.upperBound)
         self.lastUpdateCheck = defaults.object(forKey: Self.lastUpdateCheckKey) as? Date
         self.skippedUpdateVersion = defaults.string(forKey: Self.skippedUpdateVersionKey)
     }

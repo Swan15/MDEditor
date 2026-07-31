@@ -132,6 +132,8 @@ final class FontSettingsTests: XCTestCase {
         first.appearance = .dark
         first.editorFontSize = 15
         first.editorFontChoice = .monospaced
+        first.limitEditorWidth = false
+        first.editorMaxWidth = 900
 
         let second = AppSettings(defaults: defaults)
         XCTAssertFalse(second.autosaveEnabled)
@@ -140,6 +142,8 @@ final class FontSettingsTests: XCTestCase {
         XCTAssertEqual(second.appearance, .dark)
         XCTAssertEqual(second.editorFontSize, 15)
         XCTAssertEqual(second.editorFontChoice, .monospaced)
+        XCTAssertFalse(second.limitEditorWidth)
+        XCTAssertEqual(second.editorMaxWidth, 900)
     }
 
     func testNewPreferenceDefaults() throws {
@@ -150,5 +154,23 @@ final class FontSettingsTests: XCTestCase {
         XCTAssertEqual(settings.appearance, .system)
         XCTAssertEqual(settings.editorFontSize, 13)
         XCTAssertEqual(settings.editorFontChoice, .system)
+        XCTAssertTrue(settings.limitEditorWidth)
+        XCTAssertEqual(settings.editorMaxWidth, 760)
+    }
+
+    func testEditorMaxWidthIsClampedToRange() throws {
+        let settings = AppSettings(defaults: try makeDefaults())
+        settings.editorMaxWidth = 2000
+        XCTAssertEqual(settings.editorMaxWidth, 1200)
+        settings.editorMaxWidth = 100
+        XCTAssertEqual(settings.editorMaxWidth, 560)
+    }
+
+    /// A persisted out-of-range cap (edited defaults, an older build) is
+    /// clamped on load, like the font size.
+    func testEditorMaxWidthIsClampedOnLoad() throws {
+        let defaults = try makeDefaults()
+        defaults.set(Double(4000), forKey: "settings.editorMaxWidth")
+        XCTAssertEqual(AppSettings(defaults: defaults).editorMaxWidth, 1200)
     }
 }

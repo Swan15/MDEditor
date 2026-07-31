@@ -27,7 +27,7 @@ xcodebuild -project MDEditor.xcodeproj -scheme MDEditor -destination 'platform=m
 ## Layout
 
 - `MDEditor/App/` — app entry (`WindowGroup(for: WindowSession.self)` + menus + Settings scene), `WindowRootView` (per-window root), `AppState` (per-window state), `WindowRegistry` (window tracking, main-window command routing, close interception), file operations, autosave, multi-window session restore, app delegate (quit-time dirty check over all windows), PDF export/print, update checker (`UpdateChecker` — headless `runCheck` + AppKit alerts, `UpdatePolicy`/`VersionComparison` pure, network behind `UpdateFeedProvider`).
-- `MDEditor/Editor/` — the TextKit 1 stack (`MarkdownTextView` + coordinator), `StyleEngine` (visual styling; fonts derive from `AppSettings` via `StyleEngine.fontSettings`), `EditingBehavior` and `Autoformat` (headless keystroke/transform engines), `FormatCommands`, tables, images, paste conversion.
+- `MDEditor/Editor/` — the TextKit 1 stack (`MarkdownTextView` + coordinator), `ColumnLayout` (pure max-width/centering math applied by `MDTextView.applyColumnLayout`; the container never tracks the view width), `StyleEngine` (visual styling; fonts derive from `AppSettings` via `StyleEngine.fontSettings`), `EditingBehavior` and `Autoformat` (headless keystroke/transform engines), `FormatCommands`, tables, images, paste conversion.
 - `MDEditor/Markdown/` — parser, builder, serializer, semantic attribute keys.
 - `MDEditor/Models/` — document/workspace/file-tree models, `AppSettings` (UserDefaults-backed), switch/quit policy (pure, tested headless).
 - `MDEditor/Views/` — SwiftUI shell: split view, sidebar, status bar, settings.

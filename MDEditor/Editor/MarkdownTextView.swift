@@ -42,12 +42,17 @@ struct MarkdownTextView: NSViewRepresentable {
         textView.isAutomaticSpellingCorrectionEnabled = true
         textView.isAutomaticQuoteSubstitutionEnabled = true
         textView.isAutomaticDashSubstitutionEnabled = true
-        textView.textContainerInset = NSSize(width: 20, height: 24)
+        textView.textContainerInset = NSSize(width: ColumnLayout.baseInset, height: 24)
         textView.font = StyleEngine.bodyFont
         textView.typingAttributes = context.coordinator.defaultTypingAttributes
+        // Word-like column cap from the preferences; the coordinator keeps
+        // it live (see observeSettingsIfNeeded).
+        textView.columnWidthLimit = appState.settings.limitEditorWidth ? appState.settings.editorMaxWidth : nil
 
-        // Wrap to width, grow vertically inside the scroll view.
-        textContainer.widthTracksTextView = true
+        // Wrap to width, grow vertically inside the scroll view. The
+        // container width is managed by MDTextView.applyColumnLayout (the
+        // capped, centered column), so it must NOT track the text view.
+        textContainer.widthTracksTextView = false
         textView.isHorizontallyResizable = false
         textView.isVerticallyResizable = true
         textView.minSize = NSSize.zero
@@ -62,7 +67,7 @@ struct MarkdownTextView: NSViewRepresentable {
         scrollView.documentView = textView
 
         context.coordinator.textView = textView
-        context.coordinator.observeFontSettingsIfNeeded()
+        context.coordinator.observeSettingsIfNeeded()
         textView.pasteInterceptor = { [weak coordinator = context.coordinator] pasteboard in
             coordinator?.handlePaste(from: pasteboard) ?? false
         }
@@ -201,28 +206,32 @@ extension MarkdownTextView {
             scrollView.reflectScrolledClipView(clipView)
         }
 
-        // MARK: - Font preferences
+        // MARK: - Editor preferences (fonts, column width)
 
-        /// Re-styles the whole document when the font preferences change.
-        /// Installed once from `makeNSView`; re-registers after each change
-        /// (one-shot observation, same pattern as the autosave controller).
-        private var isObservingFontSettings = false
+        /// Re-applies editor preferences (fonts and the column cap) when
+        /// they change. Installed once from `makeNSView`; re-registers after
+        /// each change (one-shot observation, same pattern as the autosave
+        /// controller).
+        private var isObservingSettings = false
 
-        func observeFontSettingsIfNeeded() {
-            guard !isObservingFontSettings else { return }
-            isObservingFontSettings = true
-            observeFontSettings()
+        func observeSettingsIfNeeded() {
+            guard !isObservingSettings else { return }
+            isObservingSettings = true
+            observeSettings()
         }
 
-        private func observeFontSettings() {
+        private func observeSettings() {
             withObservationTracking {
                 _ = appState.settings.editorFontSize
                 _ = appState.settings.editorFontChoice
+                _ = appState.settings.limitEditorWidth
+                _ = appState.settings.editorMaxWidth
             } onChange: { [weak self] in
                 Task { @MainActor in
                     guard let self else { return }
                     self.applyFontSettings()
-                    self.observeFontSettings()
+                    self.applyColumnSettings()
+                    self.observeSettings()
                 }
             }
         }
@@ -240,6 +249,13 @@ extension MarkdownTextView {
             } else {
                 textView.typingAttributes = defaultTypingAttributes
             }
+        }
+
+        /// Pushes the column-width preference onto the text view; its
+        /// `columnWidthLimit` didSet re-lays out the column in place.
+        private func applyColumnSettings() {
+            guard let textView = textView as? MDTextView else { return }
+            textView.columnWidthLimit = appState.settings.limitEditorWidth ? appState.settings.editorMaxWidth : nil
         }
 
         // MARK: - NSTextViewDelegate
@@ -596,6 +612,11 @@ extension MarkdownTextView {
         /// change check absorbs cheaply).
         @objc func clipViewBoundsDidChange(_ notification: Notification) {
             updateImageHeightCap()
+            // Resizes funnel through setFrameSize, but a clip-view change
+            // that leaves the text view frame untouched (e.g. the view was
+            // born at the clip width) still reaches the column here; the
+            // application is idempotent.
+            (textView as? MDTextView)?.applyColumnLayout()
         }
 
         /// Recomputes layout for the whole storage (attachment bounds changed).
@@ -921,13 +942,22 @@ extension MarkdownTextView {
 /// The editor's text view: `NSTextView` plus Markdown-aware paste, image
 /// drag & drop, and image alt-text editing.
 final class MDTextView: NSTextView {
-    /// Keeps the text view exactly as wide as the clip view, so the
-    /// container wraps at the editor width and nothing ever overflows
-    /// sideways. The scroll view is created with a zero frame while the
-    /// text view starts 720 pt wide, so the autoresizing mask's delta math
-    /// alone would keep the view permanently 720 pt too wide (text wrapping
-    /// far past the visible edge); snapping the width on every frame
-    /// assignment covers the initial layout and every resize in one place.
+    /// Cap on the text column width (Settings ▸ Appearance ▸ Limit editor
+    /// width); nil means the column fills the editor width. The coordinator
+    /// keeps this in sync with the preferences; setting it re-lays out.
+    var columnWidthLimit: CGFloat? {
+        didSet { applyColumnLayout() }
+    }
+
+    /// Keeps the text view exactly as wide as the clip view, so nothing ever
+    /// overflows sideways. The scroll view is created with a zero frame
+    /// while the text view starts 720 pt wide, so the autoresizing mask's
+    /// delta math alone would keep the view permanently 720 pt too wide
+    /// (text wrapping far past the visible edge); snapping the width on
+    /// every frame assignment covers the initial layout and every resize in
+    /// one place. Each assignment also re-applies the column layout: the
+    /// container no longer tracks the view width, it follows
+    /// `ColumnLayout`.
     override func setFrameSize(_ newSize: NSSize) {
         var size = newSize
         if let scrollView = enclosingScrollView {
@@ -937,6 +967,36 @@ final class MDTextView: NSTextView {
             }
         }
         super.setFrameSize(size)
+        applyColumnLayout()
+    }
+
+    /// Eager first application: the initial layout may never change the
+    /// frame (the view can be born at the clip width) and the clip view
+    /// posts no bounds notification for it, so `setFrameSize` alone could
+    /// leave the container at its creation width.
+    override func viewDidMoveToWindow() {
+        super.viewDidMoveToWindow()
+        applyColumnLayout()
+    }
+
+    /// Applies the Word-like column: the container wraps at
+    /// min(view width − base insets, `columnWidthLimit`) and the horizontal
+    /// inset centers the capped column (floor: the base inset, so narrow
+    /// windows look exactly like the unlimited layout). Idempotent — no-ops
+    /// when the geometry is already right, so it is safe to call on every
+    /// frame assignment and clip-view change without re-invalidation loops.
+    func applyColumnLayout() {
+        guard let textContainer else { return }
+        let layout = ColumnLayout.containerWidthAndInset(viewWidth: frame.width, maxWidth: columnWidthLimit)
+        if abs(textContainer.containerSize.width - layout.containerWidth) > 0.5 {
+            textContainer.containerSize = NSSize(
+                width: layout.containerWidth,
+                height: textContainer.containerSize.height
+            )
+        }
+        if abs(textContainerInset.width - layout.horizontalInset) > 0.5 {
+            textContainerInset = NSSize(width: layout.horizontalInset, height: textContainerInset.height)
+        }
     }
 
     /// Inspects the pasteboard before a paste; returning true means the paste
