@@ -1,60 +1,91 @@
-# MDEditor
+<p align="center">
+  <img src="Assets/logo.png" width="180" alt="MDEditor icon">
+</p>
 
-A native macOS Markdown editor that works like a word processor: you edit styled text — headings, lists, tables, images — and never see raw syntax, while the file on disk stays canonical GitHub-Flavored Markdown. Microsoft Word on top, plain `.md` underneath.
+<h1 align="center">MDEditor</h1>
 
-<!-- Screenshots: drop images into docs/ and reference them here. -->
+<p align="center">
+  A Markdown editor for macOS that works like Microsoft Word.<br>
+  You edit rich text. The file on disk is always clean GitHub-Flavored Markdown.
+</p>
 
-## Highlights
+<p align="center">
+  <a href="https://github.com/Swan15/MDEditor/releases/latest"><img src="https://img.shields.io/github/v/release/Swan15/MDEditor" alt="Latest release"></a>
+  <img src="https://img.shields.io/badge/platform-macOS%2015%2B-blue" alt="Platform">
+  <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-green" alt="License"></a>
+</p>
 
-- **WYSIWYG editing** — headings, bold/italic/strikethrough, lists, block quotes, code blocks, horizontal rules, links, images and GFM tables render as formatted text, not syntax.
-- **Word-like behaviors** — Return/Tab/Backspace do what Word does (continue/exit lists, split headings, indent/outdent), autoformat-as-you-type (`# ` → heading, `- ` → bullet, `1. ` → numbered list, `> ` → quote, ` ``` ` → code block, `---` → rule).
-- **Tables** — real bordered tables with header shading, per-column alignment, Tab cell navigation and row/column commands.
-- **Images** — paste, drop or insert; files are stored in an `assets/` folder next to the document and referenced with relative paths.
-- **Workspace mode** — open a folder for a live file tree with create/rename/trash, plus Open Recent and session restore.
-- **Autosave** — dirty documents with a file on disk save silently ~1.5 s after you stop typing (configurable).
-- **Export & print** — one-click PDF export and standard printing.
-- **Preferences** — theme (System/Light/Dark), editor font (System / New York / SF Mono) and size, autoformat, typewriter scrolling.
+---
 
-Files are always canonical GFM: ATX headings, `-` bullets, fenced code blocks, pipe tables — open the same file in any other Markdown tool and it reads cleanly.
+Most Markdown editors make you stare at `**asterisks**` and `#` symbols, or split the window between markup and a preview. MDEditor hides the syntax completely: headings look like headings, tables look like tables, images sit inline. When you hit save, it writes canonical, diff-friendly Markdown that renders perfectly on GitHub.
 
-## Requirements
+## Features
 
-- Xcode 16.3 or newer
-- macOS 15 or newer
+- **True WYSIWYG** — headings, bold, italic, strikethrough, links, code, block quotes, lists, and rules are styled live as you type. No source view, no preview pane.
+- **Real tables** — insert, add/remove rows and columns, Tab through cells (Tab on the last cell adds a row, like Word), column alignment. Saved as GFM pipe tables.
+- **Inline images** — paste a screenshot or drag from Finder; files are copied into an `assets/` folder next to your document and referenced with relative paths.
+- **Word habits work** — Return continues lists and quotes, empty item + Return exits, Tab / ⇧Tab indents, Backspace at the start of a styled paragraph clears the style first.
+- **Autoformat** — type `#` + Space for a heading, `1.` + Space for a list, `>` + Space for a quote (can be disabled).
+- **Folder workspace** — open a folder for a VSCode-style sidebar with all your `.md` files, live-updating as files change on disk.
+- **Multi-window**, idle **autosave**, session restore, word count, dark mode, PDF export, print.
+- **Paste smart** — pasting plain text that looks like Markdown converts it to styled text; rich pastes stay rich.
+- **Self-updating** — checks GitHub Releases and tells you when a new version is out.
 
-## Build
+Under the hood it's 100% native Swift (SwiftUI + AppKit TextKit), sandboxed, with the Markdown round-trip covered by 300+ tests.
 
-The Xcode project is generated with [XcodeGen](https://github.com/yonaskolb/XcodeGen) (`project.yml` is the source of truth):
+## Install
 
-```sh
-xcodegen          # only needed after editing project.yml
-xcodebuild -project MDEditor.xcodeproj -scheme MDEditor build
+### Download the DMG
+
+1. Grab `MDEditor-<version>.dmg` from the [latest release](https://github.com/Swan15/MDEditor/releases/latest).
+2. Drag **MDEditor** into **Applications**.
+
+The app is ad-hoc signed (no paid Apple Developer certificate yet), so the first launch needs one extra step: **right-click the app → Open → Open**. macOS only asks once. (If you prefer Terminal: `xattr -dr com.apple.quarantine /Applications/MDEditor.app`.)
+
+### Homebrew
+
+```bash
+brew install --cask swan15/tap/mdeditor
 ```
 
-Or open `MDEditor.xcodeproj` and press ⌘R.
-
-## Test
-
-```sh
-xcodebuild -project MDEditor.xcodeproj -scheme MDEditor -destination 'platform=macOS' test
-```
-
-`TESTING.md` has the manual QA checklist for the things unit tests can't feel.
+Same first-launch note applies: right-click → Open.
 
 ## Keyboard shortcuts
 
 | Action | Shortcut |
-| --- | --- |
-| New / Open… / Close Document | ⌘N / ⌘O / ⌘W |
-| Save / Save As… | ⌘S / ⇧⌘S |
-| Export as PDF… / Print… | – / ⌘P |
-| Settings | ⌘, |
+|---|---|
 | Bold / Italic / Strikethrough | ⌘B / ⌘I / ⇧⌘X |
-| Body text / Heading 1–6 | ⇧⌘0 / ⇧⌘1…⇧⌘6 |
-| Ordered / Bullet list | ⇧⌘7 / ⇧⌘8 |
-| Block quote / Code block | ⇧⌘. / ⇧⌘C |
-| Insert link / Horizontal rule | ⌘K / ⇧⌘H |
-| Insert image / Insert table | ⇧⌘I / ⌥⌘T |
+| Heading 1–6 · Body text | ⇧⌘1…6 · ⇧⌘0 |
+| Ordered · Bullet list | ⇧⌘7 · ⇧⌘8 |
+| Block quote · Code block | ⇧⌘. · ⇧⌘C |
+| Link · Image · Table | ⌘K · ⇧⌘I · ⌥⌘T |
+| Horizontal rule | ⇧⌘H |
+| New window · Save As | ⌥⇧⌘N · ⇧⌘S |
 | Paste as plain text | ⌥⇧⌘V |
-| Table: next / previous cell | Tab / ⇧Tab |
-| List: indent / outdent | Tab / ⇧Tab |
+
+## Build from source
+
+Requirements: Xcode 16.3+, macOS 15+, [XcodeGen](https://github.com/yonaskolb/XcodeGen) (`brew install xcodegen`).
+
+```bash
+git clone https://github.com/Swan15/MDEditor.git
+cd MDEditor
+xcodegen
+xcodebuild -project MDEditor.xcodeproj -scheme MDEditor -destination 'platform=macOS' build
+```
+
+Run the tests:
+
+```bash
+xcodebuild -project MDEditor.xcodeproj -scheme MDEditor -destination 'platform=macOS' test
+```
+
+`MDEditor.xcodeproj` is generated — edit `project.yml`, not the project. Release DMGs are built with `Scripts/build-release.sh <version>`; pushing a `v*` tag runs the GitHub Actions release workflow.
+
+## How it works
+
+The document you're editing is an attributed string carrying semantic attributes (heading level, quote depth, list structure…). Markdown only exists at the file boundary: Apple's [swift-markdown](https://github.com/swiftlang/swift-markdown) parses it on open, and a custom serializer emits canonical GFM on save. Constructs the editor doesn't render (raw HTML, exotic syntax) are preserved verbatim so nothing is ever lost. The editor uses the mature TextKit 1 stack because TextKit 2 cannot lay out tables.
+
+## License
+
+[MIT](LICENSE) © Alexander Swan

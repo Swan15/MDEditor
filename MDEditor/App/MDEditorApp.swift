@@ -20,13 +20,21 @@ struct MDEditorApp: App {
         // session, opening the other restored windows itself).
         WindowGroup(for: WindowSession.self) { $session in
             WindowRootView(session: session, settings: settings)
-                .onAppear { appDelegate.settings = settings }
+                .onAppear {
+                    appDelegate.settings = settings
+                    // Wire the shared preferences into the update checker and
+                    // fire the once-per-launch automatic check (the checker
+                    // guards it, so extra windows don't re-fire).
+                    UpdateChecker.shared.settings = settings
+                    UpdateChecker.shared.scheduleAutomaticCheckIfNeeded()
+                }
         } defaultValue: {
             WindowSession()
         }
         .defaultSize(width: 1100, height: 750)
         .windowResizability(.contentMinSize)
         .commands {
+            appCommands
             fileCommands
             pasteCommands
             insertCommands
@@ -35,6 +43,17 @@ struct MDEditorApp: App {
 
         Settings {
             SettingsView(settings: settings)
+        }
+    }
+
+    /// "Check for Updates…" in the application menu, above Settings… (the
+    /// standard spot). A manual check always runs and reports the outcome.
+    private var appCommands: some Commands {
+        CommandGroup(before: .appSettings) {
+            Button("Check for Updates…") {
+                Task { await UpdateChecker.shared.checkForUpdates(manual: true) }
+            }
+            Divider()
         }
     }
 

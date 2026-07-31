@@ -54,6 +54,8 @@ final class AppSettings {
     private static let appearanceKey = "settings.appearance"
     private static let fontSizeKey = "settings.editorFontSize"
     private static let fontChoiceKey = "settings.editorFontChoice"
+    private static let lastUpdateCheckKey = "settings.lastUpdateCheck"
+    private static let skippedUpdateVersionKey = "settings.skippedUpdateVersion"
 
     /// Default body text size (matches the historical fixed constant).
     static let defaultFontSize: CGFloat = 13
@@ -102,6 +104,18 @@ final class AppSettings {
         didSet { defaults.set(editorFontChoice.rawValue, forKey: Self.fontChoiceKey) }
     }
 
+    /// Last time an update check was attempted (automatic checks throttle
+    /// to at most one attempt per 20 h against this).
+    var lastUpdateCheck: Date? {
+        didSet { defaults.set(lastUpdateCheck, forKey: Self.lastUpdateCheckKey) }
+    }
+
+    /// Release tag the user muted via "Skip This Version"; that tag never
+    /// prompts again (a newer tag still does).
+    var skippedUpdateVersion: String? {
+        didSet { defaults.set(skippedUpdateVersion, forKey: Self.skippedUpdateVersionKey) }
+    }
+
     private let defaults: UserDefaults
 
     init(defaults: UserDefaults = .standard) {
@@ -113,6 +127,8 @@ final class AppSettings {
         let size = defaults.object(forKey: Self.fontSizeKey) as? Double ?? Double(Self.defaultFontSize)
         self.editorFontSize = min(max(CGFloat(size), Self.fontSizeRange.lowerBound), Self.fontSizeRange.upperBound)
         self.editorFontChoice = EditorFontChoice(rawValue: defaults.string(forKey: Self.fontChoiceKey) ?? "") ?? .system
+        self.lastUpdateCheck = defaults.object(forKey: Self.lastUpdateCheckKey) as? Date
+        self.skippedUpdateVersion = defaults.string(forKey: Self.skippedUpdateVersionKey)
     }
 
     /// Installs the appearance override app-wide (called at launch; changes

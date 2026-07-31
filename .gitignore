@@ -15,3 +15,6 @@ MDEditor.xcodeproj/
 # Generated plists
 Support/Info.plist
 Support/MDEditor.entitlements
+
+# Release artifacts
+dist/

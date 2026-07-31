@@ -173,6 +173,13 @@ Run through this before shipping a build. Check items off in order; note anythin
 - [ ] Quit and relaunch with a workspace + file open: both restore (sandbox bookmarks), the tree is watched again, images next to the document load without a new grant prompt. Delete the workspace folder while the app is quit: relaunch restores nothing and shows no error (stale bookmarks clear silently).
 - [ ] Opening a folder while the current document is dirty follows the same switching rules (silent save with autosave ON, alert otherwise); the document itself stays open.
 
+## Updates
+
+- [ ] The MDEditor (application) menu shows "Check for Updates…" above Settings…. Choosing it always fetches the latest GitHub release and reports: an update alert ("MDEditor X.Y.Z is available" + short notes excerpt), "You're up to date", or an error alert (e.g. with the network off).
+- [ ] In the update alert: Download Update opens the GitHub release page in the browser (nothing is replaced in place); Later just dismisses; Skip This Version mutes that tag — relaunching (after clearing the throttle, see below) does not re-prompt for it, but a newer tag prompts again.
+- [ ] Automatic check fires once ~3 s after launch (not once per window), at most once per 20 h, and is silent unless a newer, un-skipped release exists. Force it with `defaults write com.mdeditor.app settings.lastUpdateCheck -date "2001-01-01 00:00:00 +0000"` (clear a skip with `defaults delete com.mdeditor.app settings.skippedUpdateVersion`).
+- [ ] With the network off, the launch check stays silent; only the manual check shows the error.
+
 ## Dark mode
 
 - [ ] Toggle appearance (System Settings → Appearance): text, code backgrounds, links, quote tint, table gridlines/header shading and the status bar all remain legible.
