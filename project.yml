@@ -21,6 +21,7 @@ targets:
     dependencies:
       - package: swift-markdown
         product: Markdown
+      - target: MDEditorThumbnail
     info:
       path: Support/Info.plist
       properties:
@@ -54,6 +55,40 @@ targets:
         CODE_SIGN_IDENTITY: "-"
         MARKETING_VERSION: "0.1.5"
         CURRENT_PROJECT_VERSION: "1"
+
+  MDEditorThumbnail:
+    type: app-extension
+    platform: macOS
+    sources:
+      - path: MDEditorThumbnail
+      - path: MDEditor/Markdown
+        name: SharedMarkdown
+    dependencies:
+      - package: swift-markdown
+        product: Markdown
+    info:
+      path: Support/MDEditorThumbnail-Info.plist
+      properties:
+        CFBundleName: MDEditorThumbnail
+        CFBundleShortVersionString: "$(MARKETING_VERSION)"
+        CFBundleVersion: "$(CURRENT_PROJECT_VERSION)"
+        NSExtension:
+          NSExtensionPointIdentifier: com.apple.quicklook.thumbnail
+          NSExtensionPrincipalClass: "$(PRODUCT_MODULE_NAME).ThumbnailProvider"
+        QLSupportedContentTypes:
+          - public.markdown
+          - net.daringfireball.markdown
+    entitlements:
+      path: Support/MDEditorThumbnail.entitlements
+      properties:
+        com.apple.security.app-sandbox: true
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.mdeditor.app.thumbnail
+        SWIFT_VERSION: "6.0"
+        GENERATE_INFOPLIST_FILE: NO
+        CODE_SIGN_STYLE: Automatic
+        CODE_SIGN_IDENTITY: "-"
 
   MDEditorTests:
     type: bundle.unit-test

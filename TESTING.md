@@ -186,6 +186,20 @@ Run through this before shipping a build. Check items off in order; note anythin
 - [ ] Quit and relaunch with a workspace + file open: both restore (sandbox bookmarks), the tree is watched again, images next to the document load without a new grant prompt. Delete the workspace folder while the app is quit: relaunch restores nothing and shows no error (stale bookmarks clear silently).
 - [ ] Opening a folder while the current document is dirty follows the same switching rules (silent save with autosave ON, alert otherwise); the document itself stays open.
 
+## Finder integration (open from Finder)
+
+- [ ] With MDEditor as the default Markdown handler, double-click a `.md` in Finder with the app CLOSED: the app launches and the file opens — exactly once — with no extra empty window. Do this twice in a row for files A and B: each opens its own window.
+- [ ] Cold-launch by double-clicking a file that was open when the app last quit (session restore): it restores in its window and focuses — never a second copy of the same file.
+- [ ] App RUNNING with a window on the welcome view: double-click a `.md` — it opens in that window. With a document already showing: the double-clicked file opens in its OWN window (the current document is never clobbered). Double-click a file that's already open: its window comes to the front, no duplicate.
+- [ ] Select several `.md` files in Finder and double-click: each opens exactly once (first in the key window if it's idle, the rest in their own windows).
+- [ ] Drag a `.md` onto the Dock icon: same routing as double-click.
+
+## Quick Look thumbnails
+
+- [ ] In Finder (icon view, or Get Info / quick-look preview icon), a `.md` file's icon shows the first screenful of the actual document: white page, styled text (headings larger, bold/italic/mono visible), clipped at the bottom — not the generic icon. Very large files still thumbnail quickly.
+- [ ] An empty (or whitespace-only) `.md` falls back to the generic icon; a heading-only file thumbnails fine.
+- [ ] To force a refresh while developing: `qlmanage -r cache`, then `qlmanage -t -s 512 some-file.md -o /tmp/qltest/` writes the thumbnail PNG the system would use.
+
 ## Updates
 
 - [ ] The MDEditor (application) menu shows "Check for Updates…" above Settings…. Choosing it always fetches the latest GitHub release and reports: an update alert ("MDEditor X.Y.Z is available" + short notes excerpt), "You're up to date", or an error alert (e.g. with the network off).

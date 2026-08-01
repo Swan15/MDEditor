@@ -34,6 +34,9 @@ struct WindowRootView: View {
                 registry.openWindowHandler = { openWindow(value: $0) }
                 registry.restoreSessionOnLaunch(appState: appState) { openWindow(value: $0) }
                 appState.restoreSessionIfNeeded()
+                // Files double-clicked in Finder before this window existed
+                // open now, deduped against the restored session.
+                registry.drainPendingOpenURLs(preferredAppState: appState)
             }
     }
 }

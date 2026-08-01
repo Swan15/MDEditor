@@ -14,6 +14,94 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// Shared preferences, wired from the SwiftUI app once they exist.
     var settings: AppSettings?
 
+    /// Installs our own Apple Event handler for 'odoc' (Finder double-click,
+    /// Dock drop, `open`): SwiftUI's WindowGroup installs a handler that
+    /// swallows the event without forwarding it to the app delegate or
+    /// `onOpenURL`, so files would never reach us otherwise. Installed at
+    /// will- AND did-finish-launching so ours wins regardless of when
+    /// SwiftUI registers its own.
+    func applicationWillFinishLaunching(_ notification: Notification) {
+        installOpenDocumentsHandler()
+    }
+
+    func applicationDidFinishLaunching(_ notification: Notification) {
+        installOpenDocumentsHandler()
+    }
+
+    private func installOpenDocumentsHandler() {
+        NSAppleEventManager.shared().setEventHandler(
+            self,
+            andSelector: #selector(handleOpenDocumentsEvent(_:withReplyEvent:)),
+            forEventClass: AEEventClass(kCoreEventClass),
+            andEventID: AEEventID(kAEOpenDocuments)
+        )
+    }
+
+    /// Routes every opened document through the registry (already-open files
+    /// focus their window; the rest open in the key window or their own).
+    @objc private func handleOpenDocumentsEvent(
+        _ event: NSAppleEventDescriptor,
+        withReplyEvent reply: NSAppleEventDescriptor
+    ) {
+        guard let list = event.paramDescriptor(forKeyword: keyDirectObject) else { return }
+        var urls: [URL] = []
+        for index in 1...list.numberOfItems {
+            guard let item = list.atIndex(index) else { continue }
+            // LaunchServices sends security-scoped bookmarks ('bmrk') to
+            // sandboxed apps; Finder/drop sends may use file URLs or aliases.
+            if item.descriptorType == typeBookmarkData, let url = Self.resolveOpenBookmark(item.data) {
+                urls.append(url)
+                continue
+            }
+            let descriptor = item.coerce(toDescriptorType: typeFileURL) ?? item
+            guard let string = descriptor.stringValue, let url = URL(string: string) else { continue }
+            urls.append(url)
+        }
+        WindowRegistry.shared.openFiles(urls)
+        // A document-triggered launch can create NO window (the launch "had
+        // documents"), leaving queued files with nothing to drain into.
+        // Give SwiftUI a moment to create its own window; if none appeared,
+        // sending ourselves a reopen is the Dock-click path that forces one
+        // (it drains the queue on appear).
+        if !urls.isEmpty {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+                guard WindowRegistry.shared.records.isEmpty else { return }
+                let reopen = NSAppleEventDescriptor(
+                    eventClass: AEEventClass(kCoreEventClass),
+                    eventID: AEEventID(kAEReopenApplication),
+                    targetDescriptor: NSAppleEventDescriptor(processIdentifier: getpid()),
+                    returnID: AEReturnID(kAutoGenerateReturnID),
+                    transactionID: 0
+                )
+                try? reopen.sendEvent(options: .noReply, timeout: 2)
+            }
+        }
+    }
+
+    /// Resolves a bookmark from an 'odoc' event. LS event bookmarks don't
+    /// always resolve as security-scoped, so plain resolution is the
+    /// fallback; the event's own sandbox extension grants file access.
+    private static func resolveOpenBookmark(_ data: Data) -> URL? {
+        var isStale = false
+        for options: URL.BookmarkResolutionOptions in [[.withSecurityScope], []] {
+            if let url = try? URL(
+                resolvingBookmarkData: data,
+                options: options,
+                bookmarkDataIsStale: &isStale
+            ) {
+                return url
+            }
+        }
+        return nil
+    }
+
+    /// Fallback path (the registry dedupes if both fire); the Apple Event
+    /// handler above owns the event in practice.
+    func application(_ sender: NSApplication, openFiles filenames: [String]) {
+        WindowRegistry.shared.openFiles(filenames.map { URL(fileURLWithPath: $0) })
+        NSApp.reply(toOpenOrPrint: .success)
+    }
+
     /// Decides whether the app may terminate by running the multi-document
     /// quit policy over every open window.
     func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {

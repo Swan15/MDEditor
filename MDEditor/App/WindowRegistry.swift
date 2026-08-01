@@ -76,6 +76,84 @@ final class WindowRegistry {
         }
     }
 
+    // MARK: - Finder file opens
+
+    /// File-open requests (Finder double-clicks, Dock drops) that arrived
+    /// before any window existed; the launch window drains them after its
+    /// session restore.
+    private(set) var pendingOpenURLs: [URL] = []
+
+    /// File URLs the launch session restore fanned out into windows: the
+    /// launch drain consults this once so a Finder-opened file that the
+    /// session is already reopening opens exactly once.
+    private var launchRestoredFileURLs: Set<URL> = []
+
+    /// True while file-open requests wait for the first window (drives
+    /// `applicationShouldOpenUntitledFile`).
+    var hasPendingOpenURLs: Bool { !pendingOpenURLs.isEmpty }
+
+    /// Entry point for `application(_:openFiles:)`: each file opens exactly
+    /// once — focused when already open, in the key window when it's idle,
+    /// in its own window otherwise. Before the launch window exists (cold
+    /// launch via Finder) the URLs queue up for the launch drain instead.
+    func openFiles(_ urls: [URL]) {
+        var unique: [URL] = []
+        for url in urls.map({ $0.standardizedFileURL }) where !unique.contains(url) {
+            unique.append(url)
+        }
+        guard !unique.isEmpty else { return }
+        guard didRestoreOnLaunch else {
+            for url in unique where !pendingOpenURLs.contains(url) {
+                pendingOpenURLs.append(url)
+            }
+            return
+        }
+        routeOpenURLs(unique, preferredState: mainAppState)
+    }
+
+    /// The launch window calls this after its session restore: queued
+    /// Finder opens are routed against the restored state — a file the
+    /// session already reopens (in this or another window) is never
+    /// opened a second time.
+    func drainPendingOpenURLs(preferredAppState: AppState) {
+        guard !pendingOpenURLs.isEmpty else { return }
+        let urls = pendingOpenURLs
+        pendingOpenURLs.removeAll()
+        let restored = launchRestoredFileURLs
+        launchRestoredFileURLs = []
+        routeOpenURLs(urls, preferredState: preferredAppState, skipping: restored)
+    }
+
+    /// Routes each URL: focus the window already showing it; skip files a
+    /// launch-restored window is about to open; an idle preferred window
+    /// (welcome state) takes it through the normal open flow; otherwise
+    /// the file gets its own window via the openWindow bridge. The
+    /// preferred window is the main one, falling back to the frontmost in
+    /// z-order (a single window is the target even when nothing is main,
+    /// e.g. the app launched in the background).
+    private func routeOpenURLs(_ urls: [URL], preferredState: AppState?, skipping: Set<URL> = []) {
+        let idleTarget = preferredState ?? records.first?.appState
+        for url in urls {
+            if let record = records.first(where: {
+                $0.appState.hasDocument && $0.appState.document.fileURL == url
+            }) {
+                record.window?.makeKeyAndOrderFront(nil)
+                continue
+            }
+            if skipping.contains(url) { continue }
+            if let idleTarget, !idleTarget.hasDocument {
+                idleTarget.requestOpenDocument(at: url)
+                continue
+            }
+            if openWindowHandler != nil {
+                openWindow(with: WindowSession(fileURL: url))
+            } else {
+                // No window bridge yet: keep it queued for the next drain.
+                pendingOpenURLs.append(url)
+            }
+        }
+    }
+
     /// Registers a window with its state and installs the close interceptor.
     /// Idempotent per window (the SwiftUI window accessor can fire twice).
     func attach(window: NSWindow, appState: AppState) {
@@ -135,11 +213,16 @@ final class WindowRegistry {
     /// One-shot launch restore: hands the first persisted window session to
     /// the launch window's state and opens one window per remaining entry.
     /// Backups no persisted entry references (orphans) are pruned first.
+    /// Restored file URLs are remembered so a Finder open arriving at the
+    /// same launch doesn't open them a second time.
     func restoreSessionOnLaunch(appState: AppState, openWindow: (WindowSession) -> Void) {
         guard !didRestoreOnLaunch else { return }
         didRestoreOnLaunch = true
         let entries = SessionRestore.restoreWindowEntries(defaults: appState.userDefaults)
         hotExitStore.prune(except: Set(entries.compactMap(\.untitledBackupID)))
+        launchRestoredFileURLs = Set(entries.compactMap(\.fileURL).filter {
+            FileManager.default.fileExists(atPath: $0.path)
+        })
         guard let first = entries.first else { return }
         appState.pendingRestore = first
         for entry in entries.dropFirst() {

@@ -66,7 +66,7 @@ final class MDImageAttachment: NSTextAttachment {
 
     /// Height cap applied while scaling (set by the controller from the
     /// visible editor height; window-height driven, never serialized).
-    var maxDisplayHeight: CGFloat = ImageAttachmentController.defaultMaxDisplayHeight
+    var maxDisplayHeight: CGFloat = MDImageDisplay.defaultMaxDisplayHeight
 
     /// True while `image` shows a generated placeholder instead of the real
     /// file (missing file, remote URL, …). Placeholders are re-resolved after
@@ -100,7 +100,7 @@ final class MDImageAttachment: NSTextAttachment {
                 glyphPosition: position, characterIndex: charIndex
             )
         }
-        let size = ImageAttachmentController.displaySize(
+        let size = MDImageDisplay.displaySize(
             natural: naturalSize, availableWidth: lineFrag.width - 1, maxHeight: maxDisplayHeight
         )
         return CGRect(origin: .zero, size: size)

@@ -15,7 +15,7 @@ import AppKit
 /// untouched so saving never loses the reference.
 enum ImageAttachmentController {
     /// Fallback height cap before the editor reports its real visible height.
-    static let defaultMaxDisplayHeight: CGFloat = 640
+    static let defaultMaxDisplayHeight = MDImageDisplay.defaultMaxDisplayHeight
 
     /// Fixed size of the generated placeholder image.
     static let placeholderSize = NSSize(width: 240, height: 64)
@@ -24,17 +24,10 @@ enum ImageAttachmentController {
 
     /// Display size for an image: natural width scaled DOWN to the available
     /// text width (never up), then capped at `maxHeight`, aspect preserved.
+    /// The math itself lives in the Markdown layer (`MDImageDisplay`) so
+    /// `MDImageAttachment.attachmentBounds` can use it there.
     static func displaySize(natural: NSSize, availableWidth: CGFloat, maxHeight: CGFloat) -> NSSize {
-        guard natural.width > 0, natural.height > 0 else {
-            return NSSize(width: max(availableWidth, 1), height: 1)
-        }
-        var width = min(natural.width, max(availableWidth, 1))
-        var height = width * natural.height / natural.width
-        if height > maxHeight {
-            height = maxHeight
-            width = max(natural.width * height / natural.height, 1)
-        }
-        return NSSize(width: width, height: height)
+        MDImageDisplay.displaySize(natural: natural, availableWidth: availableWidth, maxHeight: maxHeight)
     }
 
     /// Sets the height cap on every image attachment (window-resize hook).
